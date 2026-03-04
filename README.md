@@ -1,6 +1,6 @@
 # tinybox
 
-Toy implementations of core CNCF projects — built for learning, not production.
+Toy implementations of modern cloud native infrastructure — maybe used for my home server.
 
 Each project implements only the essential feature set to understand how the real system works under the hood. Written in Go, test-first.
 
