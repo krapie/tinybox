@@ -199,9 +199,12 @@ Implements `PodRuntime` using `github.com/docker/docker/client`.
 2. Map: `running → Running`, `exited/dead → Failed`, container not found → deleted
 
 **IsReady:**
-1. HTTP GET `http://{pod.PodIP}:{pod.Spec.Port}{probe.Path}`
-2. Returns true if response is 2xx within 1s timeout.
-3. If no readiness probe configured, return true once container is running.
+1. `ContainerInspect` to find the host-mapped port binding for `{pod.Spec.Port}/tcp`.
+2. HTTP GET `http://127.0.0.1:{hostPort}{probe.Path}` within 1s timeout.
+   Using the host-mapped port (not the container IP) makes probes work on macOS,
+   where containers run inside a Linux VM and their IPs are unreachable from the host.
+3. Returns true if response is 2xx.
+4. If no readiness probe configured, return true once container is running.
 
 **FakeRuntime (`runtime/fake_runtime.go`):**
 - In-memory implementation for unit tests
@@ -298,7 +301,7 @@ Example output when tinykube starts and a deployment is created:
 2026/03/21 19:00:07 [DEBUG] watcher: pod=nginx-abc12 Pending → Running
 ```
 
-### 9. API Server Logging (`apiserver/`)
+### 9. API Server Logging (`apiserver/logging.go`)
 
 HTTP access log middleware wrapping the existing mux. Logs one line per request:
 
@@ -308,11 +311,12 @@ HTTP access log middleware wrapping the existing mux. Logs one line per request:
 
 Fields: timestamp (from stdlib log), method, path, status code, response size (bytes), duration.
 
-Implemented as `loggingMiddleware(next http.Handler) http.Handler` using a
+Implemented as `loggingMiddleware(logger *log.Logger, next http.Handler) http.Handler` using a
 `responseRecorder` that captures the status code and bytes written.
+`NewWithLogger` accepts an injected logger so tests can capture output without stdout noise.
 No external logging library — stdlib `log` only.
 
-### 9. CLI — `tkctl` (`cmd/tkctl/`)
+### 10. CLI — `tkctl` (`cmd/tkctl/`)
 
 A `kubectl`-like command-line tool for tinykube. No external dependency — stdlib `flag` only.
 
@@ -332,10 +336,10 @@ tkctl status  deployment <name> [--namespace <ns>] [--server <addr>]
 
 - `--server` defaults to `http://localhost:8080`
 - `--namespace` defaults to `default`
-- Output is human-readable table format (no external table library)
-- `apply` creates or updates the deployment (PUT if exists, POST if not)
+- Output is human-readable table format using `text/tabwriter` (stdlib)
+- `apply` does a GET first — PUT if the deployment exists, POST if not
 
-### 10. Docker Compose (`docker-compose.yml`)
+### 11. Docker Compose (`docker-compose.yml` + `Dockerfile`)
 
 Runs the full tinykube stack as a single `docker compose up`:
 
@@ -409,30 +413,36 @@ No other external dependencies. Standard library for HTTP, JSON, etc.
 
 ## Milestones
 
-### M1 — Store + API Server
-- [ ] In-memory store with watch support
-- [ ] REST API CRUD for Deployments and Pods
+### M1 — Store + API Server ✓
+- [x] In-memory store with watch support
+- [x] REST API CRUD for Deployments and Pods
 - Tests written first for store and API handlers
 
-### M2 — Docker Runtime
-- [ ] `PodRuntime` interface defined
-- [ ] `FakeRuntime` implemented (for unit tests)
-- [ ] `DockerRuntime`: CreatePod, DeletePod, PodStatus, IsReady
-- [ ] Network per namespace auto-created
-- [ ] Readiness watcher goroutine
+### M2 — Docker Runtime ✓
+- [x] `PodRuntime` interface defined
+- [x] `FakeRuntime` implemented (for unit tests)
+- [x] `DockerRuntime`: CreatePod, DeletePod, PodStatus, IsReady
+- [x] Network per namespace auto-created
+- [x] Readiness watcher goroutine
 - Tests written first: fake runtime unit tests; Docker runtime integration test (tagged `//go:build integration`)
 
-### M3 — Reconciliation Loop
-- [ ] Controller scale-up / scale-down using FakeRuntime
-- [ ] Template hash detection
-- [ ] DeploymentStatus updated after each reconcile
+### M3 — Reconciliation Loop ✓
+- [x] Controller scale-up / scale-down using FakeRuntime
+- [x] Template hash detection
+- [x] DeploymentStatus updated after each reconcile
 - Tests written first using FakeRuntime
 
-### M4 — Rolling Update
-- [ ] Rolling update with maxSurge + maxUnavailable
-- [ ] UpdatedReplicas tracked in status
-- [ ] End-to-end test: update image → verify old containers replaced
+### M4 — Rolling Update ✓
+- [x] Rolling update with maxSurge + maxUnavailable
+- [x] UpdatedReplicas tracked in status
+- [x] End-to-end test: update image → verify old containers replaced
 - Tests written first using FakeRuntime; integration test with Docker
+
+### M5 — Observability + Tooling ✓
+- [x] Debug-level logger (`logger/`) injected into all components
+- [x] API server HTTP access log middleware (method, path, status, size, duration)
+- [x] `tkctl` CLI with apply / get / delete / status commands
+- [x] `Dockerfile` + `docker-compose.yml` for containerized deployment
 
 ## Test Strategy
 

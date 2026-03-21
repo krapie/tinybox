@@ -25,13 +25,24 @@ clone of a real CNCF project, written in Go.
 ## Implementation Workflow
 
 ```
-read SPEC.md → write tests → write implementation → verify tests pass → commit
+update SPEC.md → write tests → write implementation → verify tests pass → update README.md → commit
 ```
 
 **TDD is strict — no exceptions:**
 - Create the `_test.go` file first, with all test cases written out.
 - Only then create the implementation file.
 - Never write implementation code before the corresponding test exists.
+
+## Documentation Sync — Mandatory
+
+**Every feature addition or bug fix must update both documents before committing:**
+
+| Document | What to keep current |
+|---|---|
+| `SPEC.md` | Add/renumber component sections; fix any outdated API/behavior descriptions; mark milestones `[x]` when complete |
+| `README.md` | Usage examples, CLI commands, directory structure, "What it teaches" table, key design decisions |
+
+Never commit implementation changes without updating both files in the same commit.
 
 ## Code Conventions
 
