@@ -16,20 +16,22 @@ import (
 	"github.com/docker/go-connections/nat"
 
 	api "github.com/krapi0314/tinybox/tinykube/api/v1"
+	"github.com/krapi0314/tinybox/tinykube/logger"
 )
 
 // DockerRuntime implements PodRuntime using the Docker SDK.
 type DockerRuntime struct {
 	cli *client.Client
+	log *logger.Logger
 }
 
 // NewDockerRuntime creates a DockerRuntime with a default Docker client.
-func NewDockerRuntime() (*DockerRuntime, error) {
+func NewDockerRuntime(log *logger.Logger) (*DockerRuntime, error) {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		return nil, fmt.Errorf("docker client: %w", err)
 	}
-	return &DockerRuntime{cli: cli}, nil
+	return &DockerRuntime{cli: cli, log: log}, nil
 }
 
 // Close releases resources held by the Docker client.
@@ -69,6 +71,7 @@ func (d *DockerRuntime) ensureNetwork(ctx context.Context, ns string) error {
 
 // CreatePod starts a container for the pod and sets PodIP and ContainerID.
 func (d *DockerRuntime) CreatePod(ctx context.Context, pod *api.Pod) error {
+	d.log.Debug("runtime: CreatePod pod=%s image=%s", pod.Name, pod.Spec.Image)
 	if err := d.ensureNetwork(ctx, pod.Namespace); err != nil {
 		return fmt.Errorf("ensure network: %w", err)
 	}
@@ -147,6 +150,7 @@ func (d *DockerRuntime) CreatePod(ctx context.Context, pod *api.Pod) error {
 
 // DeletePod stops and removes the container.
 func (d *DockerRuntime) DeletePod(ctx context.Context, pod *api.Pod) error {
+	d.log.Debug("runtime: DeletePod pod=%s", pod.Name)
 	pod.Status = api.PodTerminating
 
 	timeout := 5
@@ -214,8 +218,11 @@ func (d *DockerRuntime) IsReady(ctx context.Context, pod *api.Pod) bool {
 	hc := &http.Client{Timeout: time.Second}
 	resp, err := hc.Get(url)
 	if err != nil {
+		d.log.Debug("runtime: IsReady pod=%s url=%s → false (%v)", pod.Name, url, err)
 		return false
 	}
 	_ = resp.Body.Close()
-	return resp.StatusCode >= 200 && resp.StatusCode < 300
+	ready := resp.StatusCode >= 200 && resp.StatusCode < 300
+	d.log.Debug("runtime: IsReady pod=%s url=%s → %v (status=%d)", pod.Name, url, ready, resp.StatusCode)
+	return ready
 }

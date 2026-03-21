@@ -5,11 +5,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/krapi0314/tinybox/tinykube/logger"
 	"github.com/krapi0314/tinybox/tinykube/store"
 )
 
 func TestPutAndGet(t *testing.T) {
-	s := store.New()
+	s := store.New(logger.NewNop())
 
 	s.Put("foo/bar", "hello")
 	val, ok := s.Get("foo/bar")
@@ -22,7 +23,7 @@ func TestPutAndGet(t *testing.T) {
 }
 
 func TestGetMissing(t *testing.T) {
-	s := store.New()
+	s := store.New(logger.NewNop())
 	_, ok := s.Get("nonexistent")
 	if ok {
 		t.Fatal("expected key to be missing")
@@ -30,7 +31,7 @@ func TestGetMissing(t *testing.T) {
 }
 
 func TestDelete(t *testing.T) {
-	s := store.New()
+	s := store.New(logger.NewNop())
 	s.Put("foo/bar", "hello")
 	s.Delete("foo/bar")
 	_, ok := s.Get("foo/bar")
@@ -40,7 +41,7 @@ func TestDelete(t *testing.T) {
 }
 
 func TestListWithPrefix(t *testing.T) {
-	s := store.New()
+	s := store.New(logger.NewNop())
 	s.Put("pods/default/pod1", "p1")
 	s.Put("pods/default/pod2", "p2")
 	s.Put("deployments/default/dep1", "d1")
@@ -52,7 +53,7 @@ func TestListWithPrefix(t *testing.T) {
 }
 
 func TestListEmpty(t *testing.T) {
-	s := store.New()
+	s := store.New(logger.NewNop())
 	items := s.List("pods/")
 	if len(items) != 0 {
 		t.Fatalf("expected 0 items, got %d", len(items))
@@ -60,7 +61,7 @@ func TestListEmpty(t *testing.T) {
 }
 
 func TestWatchAdded(t *testing.T) {
-	s := store.New()
+	s := store.New(logger.NewNop())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -82,7 +83,7 @@ func TestWatchAdded(t *testing.T) {
 }
 
 func TestWatchModified(t *testing.T) {
-	s := store.New()
+	s := store.New(logger.NewNop())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -103,7 +104,7 @@ func TestWatchModified(t *testing.T) {
 }
 
 func TestWatchDeleted(t *testing.T) {
-	s := store.New()
+	s := store.New(logger.NewNop())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -127,7 +128,7 @@ func TestWatchDeleted(t *testing.T) {
 }
 
 func TestWatchCancelledContextClosesChannel(t *testing.T) {
-	s := store.New()
+	s := store.New(logger.NewNop())
 	ctx, cancel := context.WithCancel(context.Background())
 
 	_ = s.Watch(ctx)

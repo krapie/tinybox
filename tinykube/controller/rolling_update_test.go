@@ -7,13 +7,14 @@ import (
 	api "github.com/krapi0314/tinybox/tinykube/api/v1"
 	"github.com/krapi0314/tinybox/tinykube/controller"
 	"github.com/krapi0314/tinybox/tinykube/runtime"
+	"github.com/krapi0314/tinybox/tinykube/logger"
 	"github.com/krapi0314/tinybox/tinykube/store"
 )
 
 func setupRollingUpdate() (*controller.DeploymentController, *store.Store, *runtime.FakeRuntime) {
-	s := store.New()
+	s := store.New(logger.NewNop())
 	fr := runtime.NewFakeRuntime()
-	c := controller.NewDeploymentController(s, fr)
+	c := controller.NewDeploymentController(s, fr, logger.NewNop())
 	return c, s, fr
 }
 

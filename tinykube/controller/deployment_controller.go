@@ -8,6 +8,7 @@ import (
 	"time"
 
 	api "github.com/krapi0314/tinybox/tinykube/api/v1"
+	"github.com/krapi0314/tinybox/tinykube/logger"
 	"github.com/krapi0314/tinybox/tinykube/runtime"
 	"github.com/krapi0314/tinybox/tinykube/store"
 )
@@ -16,11 +17,12 @@ import (
 type DeploymentController struct {
 	store   *store.Store
 	runtime runtime.PodRuntime
+	log     *logger.Logger
 }
 
 // NewDeploymentController creates a new DeploymentController.
-func NewDeploymentController(s *store.Store, rt runtime.PodRuntime) *DeploymentController {
-	return &DeploymentController{store: s, runtime: rt}
+func NewDeploymentController(s *store.Store, rt runtime.PodRuntime, log *logger.Logger) *DeploymentController {
+	return &DeploymentController{store: s, runtime: rt, log: log}
 }
 
 // Start runs the reconciliation loop every interval until ctx is cancelled.
@@ -41,6 +43,7 @@ func (c *DeploymentController) Start(ctx context.Context, interval time.Duration
 // in line with desired state.
 func (c *DeploymentController) Reconcile(ctx context.Context) error {
 	depItems := c.store.List("deployments/")
+	c.log.Debug("controller: reconcile — %d deployment(s)", len(depItems))
 	for _, item := range depItems {
 		dep, ok := item.(*api.Deployment)
 		if !ok {
@@ -57,6 +60,7 @@ func (c *DeploymentController) Reconcile(ctx context.Context) error {
 func (c *DeploymentController) reconcileDeployment(ctx context.Context, dep *api.Deployment) error {
 	pods := c.podsForDeployment(dep)
 	desiredHash := templateHash(dep.Spec.Template.Spec)
+	c.log.Debug("controller: deployment=%s/%s desired=%d current=%d", dep.Namespace, dep.Name, dep.Spec.Replicas, len(pods))
 
 	// Check if a rolling update is needed.
 	oldPods := podsWithDifferentHash(pods, desiredHash)
@@ -64,7 +68,8 @@ func (c *DeploymentController) reconcileDeployment(ctx context.Context, dep *api
 
 	if len(oldPods) > 0 {
 		// Rolling update: replace old pods with new ones.
-		if err := rollingUpdate(ctx, c.store, c.runtime, dep, oldPods, newPods); err != nil {
+		c.log.Debug("controller: rolling update triggered for %s/%s", dep.Namespace, dep.Name)
+		if err := rollingUpdate(ctx, c.store, c.runtime, dep, oldPods, newPods, c.log); err != nil {
 			return err
 		}
 		// Re-fetch pods after rolling update.
@@ -90,12 +95,13 @@ func (c *DeploymentController) scale(ctx context.Context, dep *api.Deployment, p
 	// Scale up.
 	for len(pods) < desired {
 		pod := newPod(dep, hash)
+		c.log.Debug("controller: scale up — creating pod %s (%s)", pod.Name, pod.Spec.Image)
 		if err := c.runtime.CreatePod(ctx, pod); err != nil {
 			return fmt.Errorf("create pod: %w", err)
 		}
 		key := "pods/" + pod.Namespace + "/" + pod.Name
 		c.store.Put(key, pod)
-		runtime.StartReadinessWatcher(ctx, c.store, c.runtime, pod)
+		runtime.StartReadinessWatcher(ctx, c.store, c.runtime, pod, c.log)
 		pods = append(pods, pod)
 	}
 
@@ -103,6 +109,7 @@ func (c *DeploymentController) scale(ctx context.Context, dep *api.Deployment, p
 	for len(pods) > desired {
 		pod := pods[len(pods)-1]
 		pods = pods[:len(pods)-1]
+		c.log.Debug("controller: scale down — deleting pod %s", pod.Name)
 		if err := c.runtime.DeletePod(ctx, pod); err != nil {
 			return fmt.Errorf("delete pod: %w", err)
 		}

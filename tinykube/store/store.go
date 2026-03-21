@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"sync"
+
+	"github.com/krapi0314/tinybox/tinykube/logger"
 )
 
 // EventType classifies a watch event.
@@ -27,12 +29,14 @@ type Store struct {
 	mu       sync.RWMutex
 	data     map[string]interface{}
 	watchers []chan Event
+	log      *logger.Logger
 }
 
 // New creates a new empty Store.
-func New() *Store {
+func New(log *logger.Logger) *Store {
 	return &Store{
 		data: make(map[string]interface{}),
+		log:  log,
 	}
 }
 
@@ -49,6 +53,7 @@ func (s *Store) Put(key string, obj interface{}) {
 	watchers := s.copyWatchers()
 	s.mu.Unlock()
 
+	s.log.Debug("store: put key=%s event=%s", key, eventType)
 	s.broadcast(watchers, event)
 }
 
@@ -73,6 +78,7 @@ func (s *Store) Delete(key string) {
 	watchers := s.copyWatchers()
 	s.mu.Unlock()
 
+	s.log.Debug("store: deleted key=%s", key)
 	s.broadcast(watchers, event)
 }
 

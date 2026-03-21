@@ -261,7 +261,44 @@ Running → (container exited) → Failed
 
 This keeps the store eventually consistent with real container state.
 
-### 8. API Server Logging (`apiserver/`)
+### 8. Logger (`logger/`)
+
+A minimal two-level logger (INFO / DEBUG) wrapping stdlib `log`. Debug output is
+enabled by default so all internal component activity is visible at startup.
+
+```go
+type Logger struct { /* unexported */ }
+
+func New(debug bool) *Logger      // debug=true → emit DEBUG lines
+func NewNop() *Logger             // discards all output (for unit tests)
+
+func (l *Logger) Info(format string, args ...interface{})
+func (l *Logger) Debug(format string, args ...interface{})
+```
+
+Every component that does meaningful work accepts a `*logger.Logger`:
+
+| Component | What is logged at DEBUG |
+|---|---|
+| Store | `put key=…`, `deleted key=…`, watch event `type=… key=…` |
+| DeploymentController | reconcile loop start/end, desired vs actual replicas, scale-up/down pod names |
+| Rolling update | wave start, pod created, pod ready, old pod deleted |
+| DockerRuntime | `CreatePod image=…`, `DeletePod`, `IsReady url=… → true/false` |
+| ReadinessWatcher | pod status transitions (`Pending → Running`, `→ Failed`) |
+
+Example output when tinykube starts and a deployment is created:
+
+```
+2026/03/21 19:00:00 [INFO]  API server listening on :8080
+2026/03/21 19:00:05 [DEBUG] controller: reconcile — 1 deployment(s)
+2026/03/21 19:00:05 [DEBUG] controller: deployment=default/nginx desired=3 current=0
+2026/03/21 19:00:05 [DEBUG] controller: scale up — creating pod nginx-abc12 (nginx:alpine)
+2026/03/21 19:00:05 [DEBUG] runtime: CreatePod pod=nginx-abc12 image=nginx:alpine
+2026/03/21 19:00:05 [DEBUG] store: put key=pods/default/nginx-abc12
+2026/03/21 19:00:07 [DEBUG] watcher: pod=nginx-abc12 Pending → Running
+```
+
+### 9. API Server Logging (`apiserver/`)
 
 HTTP access log middleware wrapping the existing mux. Logs one line per request:
 
@@ -352,6 +389,9 @@ tinykube/
 ├── scheduler/
 │   ├── scheduler.go
 │   └── scheduler_test.go
+├── logger/
+│   ├── logger.go                      ← two-level logger (Info/Debug)
+│   └── logger_test.go
 ├── Dockerfile
 ├── docker-compose.yml
 ├── go.mod

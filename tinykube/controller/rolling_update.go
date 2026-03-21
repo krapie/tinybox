@@ -6,6 +6,7 @@ import (
 	"time"
 
 	api "github.com/krapi0314/tinybox/tinykube/api/v1"
+	"github.com/krapi0314/tinybox/tinykube/logger"
 	"github.com/krapi0314/tinybox/tinykube/runtime"
 	"github.com/krapi0314/tinybox/tinykube/store"
 )
@@ -19,6 +20,7 @@ func rollingUpdate(
 	dep *api.Deployment,
 	oldPods []*api.Pod,
 	newPods []*api.Pod,
+	log *logger.Logger,
 ) error {
 	desired := dep.Spec.Replicas
 	hash := templateHash(dep.Spec.Template.Spec)
@@ -46,21 +48,26 @@ func rollingUpdate(
 			canCreate = len(oldPods)
 		}
 
+		log.Debug("rolling update: %s/%s wave — old=%d new=%d canCreate=%d",
+			dep.Namespace, dep.Name, len(oldPods), len(newPods), canCreate)
+
 		// Create new pods.
 		for i := 0; i < canCreate; i++ {
 			pod := newPod(dep, hash)
+			log.Debug("rolling update: creating pod %s (%s)", pod.Name, pod.Spec.Image)
 			if err := rt.CreatePod(ctx, pod); err != nil {
 				return fmt.Errorf("rolling update create pod: %w", err)
 			}
 			key := "pods/" + pod.Namespace + "/" + pod.Name
 			s.Put(key, pod)
-			runtime.StartReadinessWatcher(ctx, s, rt, pod)
+			runtime.StartReadinessWatcher(ctx, s, rt, pod, log)
 			newPods = append(newPods, pod)
 		}
 
 		// Wait for new pods to be ready (FakeRuntime is instant; DockerRuntime needs polling).
 		for _, pod := range newPods[len(newPods)-canCreate:] {
 			waitReady(ctx, rt, pod)
+			log.Debug("rolling update: pod %s is ready", pod.Name)
 		}
 
 		// Delete old pods (up to maxUnavailable or canCreate, whichever is smaller).
@@ -75,6 +82,7 @@ func rollingUpdate(
 		for i := 0; i < toDelete; i++ {
 			pod := oldPods[0]
 			oldPods = oldPods[1:]
+			log.Debug("rolling update: deleting old pod %s", pod.Name)
 			if err := rt.DeletePod(ctx, pod); err != nil {
 				return fmt.Errorf("rolling update delete pod: %w", err)
 			}
@@ -91,6 +99,7 @@ func rollingUpdate(
 		}
 		key := "pods/" + pod.Namespace + "/" + pod.Name
 		s.Put(key, pod)
+		runtime.StartReadinessWatcher(ctx, s, rt, pod, log)
 		newPods = append(newPods, pod)
 	}
 

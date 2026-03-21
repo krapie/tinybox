@@ -8,6 +8,7 @@ import (
 	"time"
 
 	api "github.com/krapi0314/tinybox/tinykube/api/v1"
+	"github.com/krapi0314/tinybox/tinykube/logger"
 	"github.com/krapi0314/tinybox/tinykube/runtime"
 )
 
@@ -15,7 +16,7 @@ import (
 // Run with: go test -tags=integration ./runtime/...
 
 func TestDockerRuntimeCreateAndDeletePod(t *testing.T) {
-	dr, err := runtime.NewDockerRuntime()
+	dr, err := runtime.NewDockerRuntime(logger.New(true))
 	if err != nil {
 		t.Fatalf("failed to create DockerRuntime: %v", err)
 	}
@@ -63,7 +64,7 @@ func TestDockerRuntimeCreateAndDeletePod(t *testing.T) {
 }
 
 func TestDockerRuntimeIsReadyNoProbe(t *testing.T) {
-	dr, err := runtime.NewDockerRuntime()
+	dr, err := runtime.NewDockerRuntime(logger.New(true))
 	if err != nil {
 		t.Fatalf("failed to create DockerRuntime: %v", err)
 	}

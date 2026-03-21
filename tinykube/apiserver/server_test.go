@@ -9,11 +9,12 @@ import (
 
 	api "github.com/krapi0314/tinybox/tinykube/api/v1"
 	"github.com/krapi0314/tinybox/tinykube/apiserver"
+	"github.com/krapi0314/tinybox/tinykube/logger"
 	"github.com/krapi0314/tinybox/tinykube/store"
 )
 
 func newTestServer() (*apiserver.Server, *store.Store) {
-	s := store.New()
+	s := store.New(logger.NewNop())
 	srv := apiserver.New(s)
 	return srv, s
 }
