@@ -185,18 +185,32 @@ func (d *DockerRuntime) PodStatus(ctx context.Context, pod *api.Pod) (api.PodPha
 
 // IsReady probes the pod's readiness endpoint.
 // If no readiness probe is configured, returns true once container is running.
+// Uses the host-mapped port (127.0.0.1:{hostPort}) so the probe works on macOS
+// where container IPs are inside the Docker VM and not reachable from the host.
 func (d *DockerRuntime) IsReady(ctx context.Context, pod *api.Pod) bool {
 	phase, err := d.PodStatus(ctx, pod)
 	if err != nil || phase != api.PodRunning {
 		return false
 	}
 
-	if pod.Spec.ReadinessProbe == nil || pod.PodIP == "" {
+	if pod.Spec.ReadinessProbe == nil {
 		// No probe configured: ready when running.
 		return true
 	}
 
-	url := fmt.Sprintf("http://%s:%d%s", pod.PodIP, pod.Spec.Port, pod.Spec.ReadinessProbe.Path)
+	// Inspect to find the host-mapped port.
+	info, err := d.cli.ContainerInspect(ctx, containerName(pod))
+	if err != nil {
+		return false
+	}
+	portKey := nat.Port(fmt.Sprintf("%d/tcp", pod.Spec.Port))
+	bindings, ok := info.NetworkSettings.Ports[portKey]
+	if !ok || len(bindings) == 0 {
+		return false
+	}
+	hostPort := bindings[0].HostPort
+
+	url := fmt.Sprintf("http://127.0.0.1:%s%s", hostPort, pod.Spec.ReadinessProbe.Path)
 	hc := &http.Client{Timeout: time.Second}
 	resp, err := hc.Get(url)
 	if err != nil {

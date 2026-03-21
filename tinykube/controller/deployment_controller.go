@@ -95,6 +95,7 @@ func (c *DeploymentController) scale(ctx context.Context, dep *api.Deployment, p
 		}
 		key := "pods/" + pod.Namespace + "/" + pod.Name
 		c.store.Put(key, pod)
+		runtime.StartReadinessWatcher(ctx, c.store, c.runtime, pod)
 		pods = append(pods, pod)
 	}
 

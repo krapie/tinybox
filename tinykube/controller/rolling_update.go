@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time"
 
 	api "github.com/krapi0314/tinybox/tinykube/api/v1"
 	"github.com/krapi0314/tinybox/tinykube/runtime"
@@ -53,6 +54,7 @@ func rollingUpdate(
 			}
 			key := "pods/" + pod.Namespace + "/" + pod.Name
 			s.Put(key, pod)
+			runtime.StartReadinessWatcher(ctx, s, rt, pod)
 			newPods = append(newPods, pod)
 		}
 
@@ -107,6 +109,6 @@ func waitReady(ctx context.Context, rt runtime.PodRuntime, pod *api.Pod) {
 		if rt.IsReady(ctx, pod) {
 			return
 		}
-		// Small sleep to avoid tight-looping in real scenarios; tests will return immediately.
+		time.Sleep(500 * time.Millisecond)
 	}
 }
