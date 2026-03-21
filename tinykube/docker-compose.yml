@@ -1,0 +1,10 @@
+services:
+  tinykube:
+    build: .
+    container_name: tinykube
+    ports:
+      - "8080:8080"
+    volumes:
+      # Mount the host Docker socket so tinykube can manage sibling containers.
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped

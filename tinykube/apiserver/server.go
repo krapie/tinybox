@@ -2,7 +2,9 @@ package apiserver
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
+	"os"
 	"strings"
 
 	api "github.com/krapi0314/tinybox/tinykube/api/v1"
@@ -17,6 +19,12 @@ type Server struct {
 
 // New creates a new Server backed by the given store.
 func New(s *store.Store) *Server {
+	logger := log.New(os.Stdout, "", log.LstdFlags)
+	return NewWithLogger(s, logger)
+}
+
+// NewWithLogger creates a Server using the provided logger (useful in tests).
+func NewWithLogger(s *store.Store, logger *log.Logger) *Server {
 	srv := &Server{store: s}
 	mux := http.NewServeMux()
 
@@ -26,7 +34,7 @@ func New(s *store.Store) *Server {
 	// Pod endpoints
 	mux.HandleFunc("/apis/v1/namespaces/", srv.routePods)
 
-	srv.handler = mux
+	srv.handler = loggingMiddleware(logger, mux)
 	return srv
 }
 

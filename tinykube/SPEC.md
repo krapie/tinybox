@@ -261,12 +261,71 @@ Running → (container exited) → Failed
 
 This keeps the store eventually consistent with real container state.
 
+### 8. API Server Logging (`apiserver/`)
+
+HTTP access log middleware wrapping the existing mux. Logs one line per request:
+
+```
+2026/03/21 19:00:00 POST /apis/apps/v1/namespaces/default/deployments 201 312B 1.2ms
+```
+
+Fields: timestamp (from stdlib log), method, path, status code, response size (bytes), duration.
+
+Implemented as `loggingMiddleware(next http.Handler) http.Handler` using a
+`responseRecorder` that captures the status code and bytes written.
+No external logging library — stdlib `log` only.
+
+### 9. CLI — `tkctl` (`cmd/tkctl/`)
+
+A `kubectl`-like command-line tool for tinykube. No external dependency — stdlib `flag` only.
+
+**Commands:**
+
+```
+tkctl apply   --name <name> --image <image> --replicas <n> --port <p>
+              [--namespace <ns>] [--max-surge <n>] [--max-unavailable <n>]
+              [--server <addr>]
+
+tkctl get     deployments|pods [--namespace <ns>] [--server <addr>]
+
+tkctl delete  deployment <name> [--namespace <ns>] [--server <addr>]
+
+tkctl status  deployment <name> [--namespace <ns>] [--server <addr>]
+```
+
+- `--server` defaults to `http://localhost:8080`
+- `--namespace` defaults to `default`
+- Output is human-readable table format (no external table library)
+- `apply` creates or updates the deployment (PUT if exists, POST if not)
+
+### 10. Docker Compose (`docker-compose.yml`)
+
+Runs the full tinykube stack as a single `docker compose up`:
+
+```yaml
+services:
+  tinykube:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+```
+
+Requires a `Dockerfile` that builds the `tinykube` binary.
+
+The container needs access to the Docker socket so `DockerRuntime` can manage
+sibling containers on the host Docker daemon.
+
 ## Directory Structure
 
 ```
 tinykube/
-├── cmd/tinykube/
-│   └── main.go
+├── cmd/
+│   ├── tinykube/
+│   │   └── main.go                    ← control plane entry point
+│   └── tkctl/
+│       └── main.go                    ← CLI client
 ├── api/
 │   └── v1/
 │       └── types.go
@@ -275,7 +334,9 @@ tinykube/
 │   └── store_test.go
 ├── apiserver/
 │   ├── server.go
-│   └── server_test.go
+│   ├── server_test.go
+│   ├── logging.go                     ← request logging middleware
+│   └── logging_test.go
 ├── controller/
 │   ├── deployment_controller.go
 │   ├── deployment_controller_test.go  ← uses FakeRuntime
@@ -291,6 +352,8 @@ tinykube/
 ├── scheduler/
 │   ├── scheduler.go
 │   └── scheduler_test.go
+├── Dockerfile
+├── docker-compose.yml
 ├── go.mod
 └── SPEC.md
 ```
