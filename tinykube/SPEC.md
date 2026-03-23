@@ -316,6 +316,42 @@ Implemented as `loggingMiddleware(logger *log.Logger, next http.Handler) http.Ha
 `NewWithLogger` accepts an injected logger so tests can capture output without stdout noise.
 No external logging library — stdlib `log` only.
 
+### 9b. Service Resource (`api/v1/`, `apiserver/`)
+
+A `Service` provides a stable name over a set of pods selected by label. It is the
+registry entry that tinyenvoy queries to discover live backend addresses.
+
+```go
+type ServiceSpec struct {
+    Selector   map[string]string // pods must have all these labels
+    Port       int               // service port (informational)
+    TargetPort int               // container port to reach (== Pod.Spec.Port)
+}
+
+type Service struct {
+    Name      string
+    Namespace string
+    Spec      ServiceSpec
+}
+
+type ServiceEndpoint struct {
+    PodName string
+    Addr    string // "localhost:{hostPort}" — host-mapped, reachable from host
+}
+```
+
+`Pod.HostPort` stores the ephemeral host port Docker assigned when the container
+started. The endpoint API reads this field to return addresses reachable from the
+host (or from tinyenvoy running on the host).
+
+**Endpoint discovery** (`GET …/services/{name}/endpoints`):
+1. Load the Service from the store.
+2. List all pods in the namespace.
+3. Include pods where `labelsMatch(svc.Spec.Selector, pod.Labels)` and `pod.Status == Running`.
+4. Return `[]ServiceEndpoint{{PodName, Addr: "localhost:{pod.HostPort}"}}`
+
+**Store keys:** `services/{namespace}/{name}`
+
 ### 10. CLI — `tkctl` (`cmd/tkctl/`)
 
 A `kubectl`-like command-line tool for tinykube. No external dependency — stdlib `flag` only.
@@ -495,6 +531,31 @@ No other external dependencies. Standard library for HTTP, JSON, etc.
 - [x] `tkctl apply -f <file.yaml>` — parse manifest, POST or PUT to API server
 - [x] Example manifests in `manifests/`
 - Tests written first for YAML parsing and the `-f` code path
+
+### S1 — Service Type + API ✓
+- [x] `HostPort int` added to `Pod` (host-mapped port, populated by `DockerRuntime.CreatePod`)
+- [x] `ServiceSpec`, `Service`, `ServiceEndpoint` types in `api/v1/types.go`
+- [x] `Manifest` extended with `serviceSpec:` key + `ToService()` method
+- [x] `LabelsMatch(selector, podLabels)` helper for selector-based pod filtering
+- [x] Service CRUD: `POST/GET/PUT/DELETE /apis/v1/namespaces/{ns}/services[/{name}]`
+- [x] Endpoint discovery: `GET /apis/v1/namespaces/{ns}/services/{name}/endpoints`
+  — returns Running pods matching selector as `localhost:{hostPort}` addresses
+- [x] `routeCore` replaces `routePods` in apiserver — dispatches both pods and services
+- Tests written first for types, service CRUD handlers, and endpoint discovery
+
+### S2 — tkctl Service Commands ✓
+- [x] `tkctl apply -f service.yaml` — POST or PUT a Service
+- [x] `tkctl get services [--namespace ns]` — list services
+- [x] `tkctl delete service <name> [--namespace ns]` — delete a service
+- [x] `parseManifestFile` returns both Deployment and Service from a manifest
+- Tests written first for service CLI commands
+
+### S3 — tinyenvoy Service Discovery ✓
+- [x] `DiscoveryConfig{TinykubeAddr, Service, Namespace, Interval}` added to `ClusterConfig`
+- [x] `Pool.Add(b *Backend)` and `Pool.Remove(addr string)` methods
+- [x] `internal/discovery/discovery.go` — polls `/endpoints` and diffs the pool
+- [x] `discovery.Start` goroutine wired into `cmd/envoy/main.go`
+- Tests written first for discovery client and pool mutation
 
 ## Test Strategy
 

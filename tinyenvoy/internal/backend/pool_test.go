@@ -88,3 +88,50 @@ func TestPool_ConcurrentSetHealthy(t *testing.T) {
 	// Just verifying no race — result doesn't matter
 	_ = p.Healthy()
 }
+
+func TestPool_Add(t *testing.T) {
+	p := NewPool(nil)
+
+	p.Add(NewBackend("a:8081", true))
+	if len(p.All()) != 1 {
+		t.Fatalf("after Add, All() = %d, want 1", len(p.All()))
+	}
+
+	p.Add(NewBackend("b:8082", true))
+	if len(p.All()) != 2 {
+		t.Fatalf("after second Add, All() = %d, want 2", len(p.All()))
+	}
+}
+
+func TestPool_Add_Idempotent(t *testing.T) {
+	p := NewPool(nil)
+	p.Add(NewBackend("a:8081", true))
+	p.Add(NewBackend("a:8081", true)) // duplicate
+	if len(p.All()) != 1 {
+		t.Fatalf("duplicate Add should not grow pool: got %d, want 1", len(p.All()))
+	}
+}
+
+func TestPool_Remove(t *testing.T) {
+	p := NewPool([]*Backend{
+		NewBackend("a:8081", true),
+		NewBackend("b:8082", true),
+	})
+
+	p.Remove("a:8081")
+	all := p.All()
+	if len(all) != 1 {
+		t.Fatalf("after Remove, All() = %d, want 1", len(all))
+	}
+	if all[0].Addr != "b:8082" {
+		t.Errorf("remaining backend = %q, want b:8082", all[0].Addr)
+	}
+}
+
+func TestPool_Remove_NoOp(t *testing.T) {
+	p := NewPool([]*Backend{NewBackend("a:8081", true)})
+	p.Remove("z:9999") // not present
+	if len(p.All()) != 1 {
+		t.Fatalf("Remove of absent addr should be no-op: got %d, want 1", len(p.All()))
+	}
+}

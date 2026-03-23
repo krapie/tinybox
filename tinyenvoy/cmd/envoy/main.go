@@ -14,12 +14,14 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/krapi0314/tinybox/tinyenvoy/internal/backend"
 	"github.com/krapi0314/tinybox/tinyenvoy/internal/balancer"
 	"github.com/krapi0314/tinybox/tinyenvoy/internal/config"
+	"github.com/krapi0314/tinybox/tinyenvoy/internal/discovery"
 	"github.com/krapi0314/tinybox/tinyenvoy/internal/health"
 	"github.com/krapi0314/tinybox/tinyenvoy/internal/metrics"
 	"github.com/krapi0314/tinybox/tinyenvoy/internal/middleware"
@@ -159,7 +161,7 @@ func buildClusters(ctx context.Context, cfg *config.Config, reg *metrics.Registr
 			lb.Add(b)
 		}
 
-		// Start health checkers if configured
+		// Start health checkers for static endpoints
 		if cc.HealthCheck.Path != "" {
 			for _, b := range backends {
 				b := b // capture
@@ -168,6 +170,26 @@ func buildClusters(ctx context.Context, cfg *config.Config, reg *metrics.Registr
 				// Seed endpoint_healthy gauge
 				reg.EndpointHealthy.WithLabelValues(cc.Name, b.Addr).Set(1)
 			}
+		}
+
+		// Start dynamic endpoint discovery (S3 — EDS analogue)
+		if cc.Discovery != nil {
+			discoveryCfg := &discovery.Config{
+				Service:   cc.Discovery.Service,
+				Namespace: cc.Discovery.Namespace,
+				Interval:  cc.Discovery.Interval,
+			}
+			if discoveryCfg.Interval == 0 {
+				discoveryCfg.Interval = 10 * time.Second
+			}
+			client := discovery.NewClient(cc.Discovery.TinykubeAddr)
+			discovery.Start(ctx, client, pool, discoveryCfg)
+			logger.Info("service discovery started",
+				"cluster", cc.Name,
+				"service", cc.Discovery.Service,
+				"namespace", cc.Discovery.Namespace,
+				"interval", discoveryCfg.Interval,
+			)
 		}
 
 		entries[cc.Name] = &clusterEntry{lb: lb, pool: pool}

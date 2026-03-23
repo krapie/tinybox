@@ -76,11 +76,18 @@ func cmdApply(args []string) (string, error) {
 
 	if *file != "" {
 		// Manifest mode: parse YAML file.
-		parsed, err := parseManifestFile(*file)
+		parsedDep, parsedSvc, err := parseManifestFile(*file)
 		if err != nil {
 			return "", err
 		}
-		dep = *parsed
+		if parsedSvc != nil {
+			// Service manifest — delegate to service apply.
+			if *ns != defaultNamespace {
+				parsedSvc.Namespace = *ns
+			}
+			return applyService(*server, parsedSvc)
+		}
+		dep = *parsedDep
 		// --server and --namespace flags still apply as overrides.
 		if *ns != defaultNamespace {
 			dep.Namespace = *ns
@@ -166,8 +173,10 @@ func cmdGet(args []string) (string, error) {
 		return getDeployments(*server, *ns)
 	case "pods", "pod":
 		return getPods(*server, *ns)
+	case "services", "service":
+		return getServices(*server, *ns)
 	default:
-		return "", fmt.Errorf("unknown resource %q — use deployments or pods", resource)
+		return "", fmt.Errorf("unknown resource %q — use deployments, pods, or services", resource)
 	}
 }
 
@@ -258,8 +267,23 @@ func cmdDelete(args []string) (string, error) {
 			return "", fmt.Errorf("deployment %q not found", name)
 		}
 		return fmt.Sprintf("deployment/%s deleted\n", name), nil
+	case "service":
+		url := fmt.Sprintf("%s/apis/v1/namespaces/%s/services/%s", *server, *ns, name)
+		req, err := http.NewRequest(http.MethodDelete, url, nil)
+		if err != nil {
+			return "", err
+		}
+		httpResp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return "", fmt.Errorf("connecting to server: %w", err)
+		}
+		_ = httpResp.Body.Close()
+		if httpResp.StatusCode == http.StatusNotFound {
+			return "", fmt.Errorf("service %q not found", name)
+		}
+		return fmt.Sprintf("service/%s deleted\n", name), nil
 	default:
-		return "", fmt.Errorf("unknown resource %q — use deployment", resource)
+		return "", fmt.Errorf("unknown resource %q — use deployment or service", resource)
 	}
 }
 
@@ -331,6 +355,67 @@ func doRequest(method, url string, body io.Reader) ([]byte, error) {
 	return data, nil
 }
 
+// applyService creates or updates a Service via the API server.
+func applyService(server string, svc *api.Service) (string, error) {
+	body, _ := json.Marshal(svc)
+	base := fmt.Sprintf("%s/apis/v1/namespaces/%s/services", server, svc.Namespace)
+
+	checkResp, err := http.Get(base + "/" + svc.Name)
+	if err != nil {
+		return "", fmt.Errorf("connecting to server: %w", err)
+	}
+	_ = checkResp.Body.Close()
+
+	var result api.Service
+	if checkResp.StatusCode == http.StatusOK {
+		r, err := doRequest(http.MethodPut, base+"/"+svc.Name, bytes.NewReader(body))
+		if err != nil {
+			return "", err
+		}
+		if err := json.Unmarshal(r, &result); err != nil {
+			return "", fmt.Errorf("parse response: %w", err)
+		}
+		return fmt.Sprintf("service/%s updated\n", result.Name), nil
+	}
+
+	r, err := doRequest(http.MethodPost, base, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	if err := json.Unmarshal(r, &result); err != nil {
+		return "", fmt.Errorf("parse response: %w", err)
+	}
+	return fmt.Sprintf("service/%s created\n", result.Name), nil
+}
+
+func getServices(server, ns string) (string, error) {
+	url := fmt.Sprintf("%s/apis/v1/namespaces/%s/services", server, ns)
+	body, err := doRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	var svcs []api.Service
+	if err := json.Unmarshal(body, &svcs); err != nil {
+		return "", fmt.Errorf("parse response: %w", err)
+	}
+
+	var sb strings.Builder
+	w := tabwriter.NewWriter(&sb, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(w, "NAME\tNAMESPACE\tPORT\tSELECTOR")
+	for _, svc := range svcs {
+		selector := ""
+		for k, v := range svc.Spec.Selector {
+			if selector != "" {
+				selector += ","
+			}
+			selector += k + "=" + v
+		}
+		fmt.Fprintf(w, "%s\t%s\t%d\t%s\n", svc.Name, svc.Namespace, svc.Spec.Port, selector)
+	}
+	_ = w.Flush()
+	return sb.String(), nil
+}
+
 func printUsage() {
 	fmt.Println(`tkctl — tinykube CLI
 
@@ -338,8 +423,9 @@ Usage:
   tkctl apply   --name <name> --image <image> [--replicas <n>] [--port <p>]
                 [--namespace <ns>] [--max-surge <n>] [--max-unavailable <n>]
                 [--server <addr>]
-  tkctl get     deployments|pods [--namespace <ns>] [--server <addr>]
-  tkctl delete  deployment <name> [--namespace <ns>] [--server <addr>]
+  tkctl apply   -f <manifest.yaml> [--namespace <ns>] [--server <addr>]
+  tkctl get     deployments|pods|services [--namespace <ns>] [--server <addr>]
+  tkctl delete  deployment|service <name> [--namespace <ns>] [--server <addr>]
   tkctl status  deployment <name> [--namespace <ns>] [--server <addr>]
 
 Flags default to --namespace=default --server=http://localhost:8080`)

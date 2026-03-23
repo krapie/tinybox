@@ -52,3 +52,30 @@ func (p *Pool) SetHealthy(addr string, healthy bool) {
 		}
 	}
 }
+
+// Add appends b to the pool if no backend with the same address already exists.
+// Analogous to EDS endpoint addition in Envoy's xDS.
+func (p *Pool) Add(b *Backend) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, existing := range p.backends {
+		if existing.Addr == b.Addr {
+			return // idempotent
+		}
+	}
+	p.backends = append(p.backends, b)
+}
+
+// Remove removes the backend with the given address from the pool.
+// It is a no-op if the address is not present.
+func (p *Pool) Remove(addr string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := p.backends[:0]
+	for _, b := range p.backends {
+		if b.Addr != addr {
+			out = append(out, b)
+		}
+	}
+	p.backends = out
+}

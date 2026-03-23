@@ -2,6 +2,7 @@ package apiserver
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -31,8 +32,8 @@ func NewWithLogger(s *store.Store, logger *log.Logger) *Server {
 	// Deployment endpoints
 	mux.HandleFunc("/apis/apps/v1/namespaces/", srv.routeDeployments)
 
-	// Pod endpoints
-	mux.HandleFunc("/apis/v1/namespaces/", srv.routePods)
+	// Pod and Service endpoints
+	mux.HandleFunc("/apis/v1/namespaces/", srv.routeCore)
 
 	srv.handler = loggingMiddleware(logger, mux)
 	return srv
@@ -112,32 +113,79 @@ func (s *Server) routeDeployments(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// routePods dispatches pod API requests.
-// Pattern: /apis/v1/namespaces/{ns}/pods[/{name}]
-func (s *Server) routePods(w http.ResponseWriter, r *http.Request) {
+// routeCore dispatches pod and service API requests.
+// Patterns:
+//
+//	/apis/v1/namespaces/{ns}/pods[/{name}]
+//	/apis/v1/namespaces/{ns}/services[/{name}[/endpoints]]
+func (s *Server) routeCore(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/apis/v1/namespaces/")
 	parts := strings.Split(strings.TrimSuffix(path, "/"), "/")
 
-	if len(parts) < 2 || parts[1] != "pods" {
+	if len(parts) < 2 {
 		http.NotFound(w, r)
 		return
 	}
 
 	ns := parts[0]
 
-	switch {
-	case len(parts) == 2:
+	switch parts[1] {
+	case "pods":
+		s.dispatchPods(w, r, ns, parts[2:])
+	case "services":
+		s.dispatchServices(w, r, ns, parts[2:])
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (s *Server) dispatchPods(w http.ResponseWriter, r *http.Request, ns string, rest []string) {
+	switch len(rest) {
+	case 0:
 		if r.Method == http.MethodGet {
 			s.listPods(w, r, ns)
 		} else {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
-	case len(parts) == 3:
-		name := parts[2]
+	case 1:
 		if r.Method == http.MethodGet {
-			s.getPod(w, r, ns, name)
+			s.getPod(w, r, ns, rest[0])
 		} else {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (s *Server) dispatchServices(w http.ResponseWriter, r *http.Request, ns string, rest []string) {
+	switch len(rest) {
+	case 0:
+		switch r.Method {
+		case http.MethodGet:
+			s.listServices(w, r, ns)
+		case http.MethodPost:
+			s.createService(w, r, ns)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	case 1:
+		name := rest[0]
+		switch r.Method {
+		case http.MethodGet:
+			s.getService(w, r, ns, name)
+		case http.MethodPut:
+			s.updateService(w, r, ns, name)
+		case http.MethodDelete:
+			s.deleteService(w, r, ns, name)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	case 2:
+		if rest[1] == "endpoints" && r.Method == http.MethodGet {
+			s.getServiceEndpoints(w, r, ns, rest[0])
+		} else {
+			http.NotFound(w, r)
 		}
 	default:
 		http.NotFound(w, r)
@@ -247,4 +295,110 @@ func (s *Server) getPod(w http.ResponseWriter, r *http.Request, ns, name string)
 	}
 	pod := val.(*api.Pod)
 	writeJSON(w, http.StatusOK, pod)
+}
+
+// --- Service handlers ---
+
+func (s *Server) createService(w http.ResponseWriter, r *http.Request, ns string) {
+	var svc api.Service
+	if err := json.NewDecoder(r.Body).Decode(&svc); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	svc.Namespace = ns
+	key := "services/" + ns + "/" + svc.Name
+
+	if _, exists := s.store.Get(key); exists {
+		writeError(w, http.StatusConflict, "service already exists")
+		return
+	}
+
+	s.store.Put(key, &svc)
+	writeJSON(w, http.StatusCreated, svc)
+}
+
+func (s *Server) listServices(w http.ResponseWriter, r *http.Request, ns string) {
+	items := s.store.List("services/" + ns + "/")
+	svcs := make([]api.Service, 0, len(items))
+	for _, item := range items {
+		if svc, ok := item.(*api.Service); ok {
+			svcs = append(svcs, *svc)
+		}
+	}
+	writeJSON(w, http.StatusOK, svcs)
+}
+
+func (s *Server) getService(w http.ResponseWriter, r *http.Request, ns, name string) {
+	key := "services/" + ns + "/" + name
+	val, ok := s.store.Get(key)
+	if !ok {
+		writeError(w, http.StatusNotFound, "service not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, val.(*api.Service))
+}
+
+func (s *Server) updateService(w http.ResponseWriter, r *http.Request, ns, name string) {
+	key := "services/" + ns + "/" + name
+	if _, exists := s.store.Get(key); !exists {
+		writeError(w, http.StatusNotFound, "service not found")
+		return
+	}
+	var svc api.Service
+	if err := json.NewDecoder(r.Body).Decode(&svc); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	svc.Namespace = ns
+	svc.Name = name
+	s.store.Put(key, &svc)
+	writeJSON(w, http.StatusOK, svc)
+}
+
+func (s *Server) deleteService(w http.ResponseWriter, r *http.Request, ns, name string) {
+	key := "services/" + ns + "/" + name
+	if _, exists := s.store.Get(key); !exists {
+		writeError(w, http.StatusNotFound, "service not found")
+		return
+	}
+	s.store.Delete(key)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) getServiceEndpoints(w http.ResponseWriter, r *http.Request, ns, name string) {
+	key := "services/" + ns + "/" + name
+	val, ok := s.store.Get(key)
+	if !ok {
+		writeError(w, http.StatusNotFound, "service not found")
+		return
+	}
+	svc := val.(*api.Service)
+
+	items := s.store.List("pods/" + ns + "/")
+	endpoints := make([]api.ServiceEndpoint, 0)
+	for _, item := range items {
+		pod, ok := item.(*api.Pod)
+		if !ok {
+			continue
+		}
+		if pod.Status != api.PodRunning {
+			continue
+		}
+		if pod.HostPort == 0 {
+			continue
+		}
+		if !api.LabelsMatch(svc.Spec.Selector, pod.Labels) {
+			continue
+		}
+		endpoints = append(endpoints, api.ServiceEndpoint{
+			PodName: pod.Name,
+			Addr:    "localhost:" + itoa(pod.HostPort),
+		})
+	}
+	writeJSON(w, http.StatusOK, endpoints)
+}
+
+// itoa converts an int to its decimal string representation.
+func itoa(n int) string {
+	return fmt.Sprintf("%d", n)
 }

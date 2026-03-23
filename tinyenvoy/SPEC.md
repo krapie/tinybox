@@ -29,7 +29,7 @@ Goal is learning through clean, well-structured code — not production hardenin
 - Listener: single HTTP/HTTPS listener (Envoy ListenerManager)
 - Route Configuration: virtual-host matching (exact + wildcard) with path-prefix rules
 - Cluster Manager: named upstream clusters, each with its own LB policy
-- Endpoint Discovery: static endpoints declared in config (no EDS)
+- Endpoint Discovery: static endpoints in config **or** dynamic via tinykube Service API (EDS analogue)
 - Load Balancing: Round Robin + Ring Hash (Envoy's `RING_HASH` policy)
 - Health Checks: active HTTP health checks mirroring Envoy's health_check filter
 - Access Logging: structured per-request log (method, path, cluster, status, latency)
@@ -75,9 +75,12 @@ tinyenvoy/
 │   │   ├── logging_test.go
 │   │   ├── metrics.go        # Stats filter (Prometheus per-cluster counters)
 │   │   └── metrics_test.go
-│   └── proxy/
+│   ├── proxy/
 │       ├── proxy.go          # Cluster proxy: httputil.ReverseProxy per cluster
 │       └── proxy_test.go
+│   └── discovery/
+│       ├── discovery.go      # EDS analogue: polls tinykube /endpoints, diffs pool
+│       └── discovery_test.go
 ```
 
 ## Config Schema
@@ -111,6 +114,22 @@ clusters:
       - addr: localhost:8081
       - addr: localhost:8082
       - addr: localhost:8083
+
+  # Optional: EDS-style dynamic discovery via tinykube Service API.
+  # When set, the static endpoints list is ignored.
+  - name: whoami
+    lb_policy: round-robin
+    health_check:
+      path: /health
+      interval: 10s
+      timeout: 2s
+      unhealthy_threshold: 3
+      healthy_threshold: 2
+    discovery:
+      tinykube_addr: http://localhost:8080   # tinykube API server
+      service: whoami                        # tinykube Service name
+      namespace: default
+      interval: 5s                           # how often to poll /endpoints
 
 # Route configuration (Envoy: route_config.virtual_hosts)
 routes:
@@ -219,7 +238,7 @@ Prometheus metrics, mirroring Envoy's cluster stats:
 ## Implementation Order (TDD)
 
 1. [x] `internal/config` — parse YAML, unit test struct fields
-2. [x] `internal/backend` — Endpoint + Pool, test Healthy() filtering
+2. [x] `internal/backend` — Endpoint + Pool, test Healthy() filtering; `Add`/`Remove` for EDS
 3. [x] `internal/balancer` — RR + ring-hash, table-driven tests
 4. [x] `internal/health` — active health check with httptest.Server mock
 5. [x] `internal/router` — virtual-host + path matching, table tests
@@ -228,6 +247,7 @@ Prometheus metrics, mirroring Envoy's cluster stats:
 8. [x] `internal/proxy` — cluster proxy wiring, integration test with mock endpoints
 9. [x] `internal/config/watcher` — hot reload, test config swap
 10. [x] `cmd/envoy/main.go` — wire all packages, SIGINT/SIGTERM handling
+11. [x] `internal/discovery` — EDS analogue: poll tinykube `/endpoints` + diff pool (S3)
 
 ## Verification
 

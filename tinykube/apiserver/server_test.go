@@ -296,3 +296,256 @@ func TestGetPodNotFound(t *testing.T) {
 		t.Fatalf("expected 404, got %d", w.Code)
 	}
 }
+
+// --- Service tests ---
+
+func TestCreateService(t *testing.T) {
+	srv, _ := newTestServer()
+
+	svc := api.Service{
+		Name:      "web-svc",
+		Namespace: "default",
+		Spec: api.ServiceSpec{
+			Selector:   map[string]string{"app": "web"},
+			Port:       80,
+			TargetPort: 80,
+		},
+	}
+	body, _ := json.Marshal(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/apis/v1/namespaces/default/services", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var result api.Service
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if result.Name != "web-svc" {
+		t.Fatalf("expected name 'web-svc', got %s", result.Name)
+	}
+}
+
+func TestCreateServiceConflict(t *testing.T) {
+	srv, s := newTestServer()
+
+	svc := &api.Service{Name: "web-svc", Namespace: "default"}
+	s.Put("services/default/web-svc", svc)
+
+	body, _ := json.Marshal(svc)
+	req := httptest.NewRequest(http.MethodPost, "/apis/v1/namespaces/default/services", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", w.Code)
+	}
+}
+
+func TestListServices(t *testing.T) {
+	srv, s := newTestServer()
+
+	s.Put("services/default/svc1", &api.Service{Name: "svc1", Namespace: "default"})
+	s.Put("services/default/svc2", &api.Service{Name: "svc2", Namespace: "default"})
+
+	req := httptest.NewRequest(http.MethodGet, "/apis/v1/namespaces/default/services", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var result []api.Service
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(result) != 2 {
+		t.Fatalf("expected 2 services, got %d", len(result))
+	}
+}
+
+func TestGetService(t *testing.T) {
+	srv, s := newTestServer()
+
+	svc := &api.Service{
+		Name:      "web-svc",
+		Namespace: "default",
+		Spec:      api.ServiceSpec{Selector: map[string]string{"app": "web"}, Port: 80},
+	}
+	s.Put("services/default/web-svc", svc)
+
+	req := httptest.NewRequest(http.MethodGet, "/apis/v1/namespaces/default/services/web-svc", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var result api.Service
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if result.Spec.Port != 80 {
+		t.Fatalf("expected port 80, got %d", result.Spec.Port)
+	}
+}
+
+func TestGetServiceNotFound(t *testing.T) {
+	srv, _ := newTestServer()
+
+	req := httptest.NewRequest(http.MethodGet, "/apis/v1/namespaces/default/services/nope", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestDeleteService(t *testing.T) {
+	srv, s := newTestServer()
+
+	s.Put("services/default/web-svc", &api.Service{Name: "web-svc", Namespace: "default"})
+
+	req := httptest.NewRequest(http.MethodDelete, "/apis/v1/namespaces/default/services/web-svc", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", w.Code)
+	}
+
+	if _, ok := s.Get("services/default/web-svc"); ok {
+		t.Fatal("service should have been deleted")
+	}
+}
+
+func TestDeleteServiceNotFound(t *testing.T) {
+	srv, _ := newTestServer()
+
+	req := httptest.NewRequest(http.MethodDelete, "/apis/v1/namespaces/default/services/nope", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestGetServiceEndpoints(t *testing.T) {
+	srv, s := newTestServer()
+
+	svc := &api.Service{
+		Name:      "web-svc",
+		Namespace: "default",
+		Spec: api.ServiceSpec{
+			Selector:   map[string]string{"app": "web"},
+			Port:       80,
+			TargetPort: 80,
+		},
+	}
+	s.Put("services/default/web-svc", svc)
+
+	// Running pods with matching label
+	pod1 := &api.Pod{
+		Name:      "web-a1b2c",
+		Namespace: "default",
+		Labels:    map[string]string{"app": "web"},
+		Status:    api.PodRunning,
+		HostPort:  54321,
+	}
+	pod2 := &api.Pod{
+		Name:      "web-d3e4f",
+		Namespace: "default",
+		Labels:    map[string]string{"app": "web"},
+		Status:    api.PodRunning,
+		HostPort:  54322,
+	}
+	// Pod in wrong state — should be excluded
+	pod3 := &api.Pod{
+		Name:      "web-pend",
+		Namespace: "default",
+		Labels:    map[string]string{"app": "web"},
+		Status:    api.PodPending,
+		HostPort:  54323,
+	}
+	// Pod with non-matching label — should be excluded
+	pod4 := &api.Pod{
+		Name:      "other-xyz",
+		Namespace: "default",
+		Labels:    map[string]string{"app": "other"},
+		Status:    api.PodRunning,
+		HostPort:  54324,
+	}
+	s.Put("pods/default/web-a1b2c", pod1)
+	s.Put("pods/default/web-d3e4f", pod2)
+	s.Put("pods/default/web-pend", pod3)
+	s.Put("pods/default/other-xyz", pod4)
+
+	req := httptest.NewRequest(http.MethodGet, "/apis/v1/namespaces/default/services/web-svc/endpoints", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var endpoints []api.ServiceEndpoint
+	if err := json.NewDecoder(w.Body).Decode(&endpoints); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(endpoints) != 2 {
+		t.Fatalf("expected 2 endpoints, got %d", len(endpoints))
+	}
+	for _, ep := range endpoints {
+		if ep.Addr == "" {
+			t.Error("endpoint Addr should not be empty")
+		}
+	}
+}
+
+func TestGetServiceEndpointsNotFound(t *testing.T) {
+	srv, _ := newTestServer()
+
+	req := httptest.NewRequest(http.MethodGet, "/apis/v1/namespaces/default/services/nope/endpoints", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestGetServiceEndpointsNoRunningPods(t *testing.T) {
+	srv, s := newTestServer()
+
+	s.Put("services/default/empty-svc", &api.Service{
+		Name:      "empty-svc",
+		Namespace: "default",
+		Spec:      api.ServiceSpec{Selector: map[string]string{"app": "ghost"}},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/apis/v1/namespaces/default/services/empty-svc/endpoints", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var endpoints []api.ServiceEndpoint
+	if err := json.NewDecoder(w.Body).Decode(&endpoints); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(endpoints) != 0 {
+		t.Fatalf("expected 0 endpoints, got %d", len(endpoints))
+	}
+}

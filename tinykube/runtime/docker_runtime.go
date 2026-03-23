@@ -144,6 +144,19 @@ func (d *DockerRuntime) CreatePod(ctx context.Context, pod *api.Pod) error {
 	if ep, ok := info.NetworkSettings.Networks[networkName(pod.Namespace)]; ok {
 		pod.PodIP = ep.IPAddress
 	}
+
+	// Capture the host-mapped port for endpoint discovery (needed on macOS where
+	// container IPs are inside the Docker VM and not reachable from the host).
+	if pod.Spec.Port > 0 {
+		portKey := nat.Port(fmt.Sprintf("%d/tcp", pod.Spec.Port))
+		if bindings, ok := info.NetworkSettings.Ports[portKey]; ok && len(bindings) > 0 {
+			hostPortStr := bindings[0].HostPort
+			var hp int
+			_, _ = fmt.Sscanf(hostPortStr, "%d", &hp)
+			pod.HostPort = hp
+		}
+	}
+
 	pod.Status = api.PodPending
 	return nil
 }

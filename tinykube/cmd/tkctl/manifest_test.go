@@ -47,7 +47,7 @@ func writeTempManifest(t *testing.T, content string) string {
 
 func TestParseManifestDeployment(t *testing.T) {
 	path := writeTempManifest(t, sampleManifest)
-	dep, err := parseManifestFile(path)
+	dep, _, err := parseManifestFile(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -98,7 +98,7 @@ spec:
     maxSurge: 1
     maxUnavailable: 0
 `)
-	dep, err := parseManifestFile(path)
+	dep, _, err := parseManifestFile(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -108,15 +108,52 @@ spec:
 }
 
 func TestParseManifestUnknownKind(t *testing.T) {
-	path := writeTempManifest(t, `kind: Service\nname: foo`)
-	_, err := parseManifestFile(path)
+	path := writeTempManifest(t, "kind: Pod\nname: foo")
+	_, _, err := parseManifestFile(path)
 	if err == nil {
 		t.Error("expected error for unknown kind")
 	}
 }
 
+const sampleServiceManifest = `
+kind: Service
+name: web-svc
+namespace: default
+serviceSpec:
+  selector:
+    app: web
+  port: 80
+  targetPort: 80
+`
+
+func TestParseManifestService(t *testing.T) {
+	path := writeTempManifest(t, sampleServiceManifest)
+	dep, svc, err := parseManifestFile(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dep != nil {
+		t.Error("expected nil Deployment for Service manifest")
+	}
+	if svc == nil {
+		t.Fatal("expected non-nil Service")
+	}
+	if svc.Name != "web-svc" {
+		t.Errorf("expected name web-svc, got %s", svc.Name)
+	}
+	if svc.Namespace != "default" {
+		t.Errorf("expected namespace default, got %s", svc.Namespace)
+	}
+	if svc.Spec.Port != 80 {
+		t.Errorf("expected port 80, got %d", svc.Spec.Port)
+	}
+	if svc.Spec.Selector["app"] != "web" {
+		t.Errorf("expected selector app=web, got %v", svc.Spec.Selector)
+	}
+}
+
 func TestParseManifestFileNotFound(t *testing.T) {
-	_, err := parseManifestFile(filepath.Join(t.TempDir(), "does-not-exist.yaml"))
+	_, _, err := parseManifestFile(filepath.Join(t.TempDir(), "does-not-exist.yaml"))
 	if err == nil {
 		t.Error("expected error for missing file")
 	}
@@ -155,7 +192,7 @@ func TestApplyRequiresFileOrName(t *testing.T) {
 // Verify that the api/v1 types round-trip through yaml correctly.
 func TestTypesYAMLRoundTrip(t *testing.T) {
 	path := writeTempManifest(t, sampleManifest)
-	dep, err := parseManifestFile(path)
+	dep, _, err := parseManifestFile(path)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}

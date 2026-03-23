@@ -17,6 +17,8 @@ Built as part of [tinybox](../README.md), a collection of simplified CNCF projec
 | Structured two-level logging across components | `logger/logger.go` |
 | HTTP access log middleware | `apiserver/logging.go` |
 | kubectl-like CLI tooling | `cmd/tkctl/main.go` |
+| Service resource and selector-based endpoint discovery | `api/v1/types.go`, `apiserver/server.go` |
+| Host-mapped port for cross-host reachability (macOS Docker) | `runtime/docker_runtime.go` |
 
 ## Architecture
 
@@ -174,6 +176,33 @@ tkctl delete deployment nginx
 # deployment/nginx deleted
 ```
 
+### Service commands
+
+```bash
+# Apply a Service manifest
+tkctl apply -f manifests/whoami-svc.yaml
+# service/whoami created
+
+# List services
+tkctl get services
+# NAME     NAMESPACE   PORT   SELECTOR
+# whoami   default     80     app=whoami
+
+# Delete a service
+tkctl delete service whoami
+# service/whoami deleted
+```
+
+### Get live endpoints for a service
+
+This calls the endpoint discovery API — returns only Running pods matching the selector:
+
+```bash
+curl http://localhost:8080/apis/v1/namespaces/default/services/whoami/endpoints
+# [{"podName":"whoami-a1b2c","addr":"localhost:54321"},
+#  {"podName":"whoami-d3e4f","addr":"localhost:54322"}]
+```
+
 ### Flags
 
 | Flag | Default | Description |
@@ -238,6 +267,12 @@ curl -X PUT http://localhost:8080/apis/apps/v1/namespaces/default/deployments/ng
 | GET | `/apis/apps/v1/namespaces/{ns}/deployments/{name}/status` | Get status |
 | GET | `/apis/v1/namespaces/{ns}/pods` | List pods |
 | GET | `/apis/v1/namespaces/{ns}/pods/{name}` | Get pod |
+| POST | `/apis/v1/namespaces/{ns}/services` | Create service |
+| GET | `/apis/v1/namespaces/{ns}/services` | List services |
+| GET | `/apis/v1/namespaces/{ns}/services/{name}` | Get service |
+| PUT | `/apis/v1/namespaces/{ns}/services/{name}` | Update service |
+| DELETE | `/apis/v1/namespaces/{ns}/services/{name}` | Delete service |
+| GET | `/apis/v1/namespaces/{ns}/services/{name}/endpoints` | Get live endpoints |
 
 ## Testing
 
@@ -281,13 +316,29 @@ spec:
 
 | Field | Required | Description |
 |---|---|---|
-| `kind` | yes | Must be `Deployment` |
-| `name` | yes | Deployment name |
+| `kind` | yes | `Deployment` or `Service` |
+| `name` | yes | Resource name |
 | `namespace` | no | Defaults to `default` |
-| `spec.replicas` | yes | Desired pod count |
-| `spec.strategy.maxSurge` | yes | Extra pods allowed during rolling update |
-| `spec.strategy.maxUnavailable` | yes | Pods allowed unavailable during rolling update |
+| `spec.replicas` | yes (Deployment) | Desired pod count |
+| `spec.strategy.maxSurge` | yes (Deployment) | Extra pods allowed during rolling update |
+| `spec.strategy.maxUnavailable` | yes (Deployment) | Pods allowed unavailable during rolling update |
 | `spec.template.spec.readinessProbe` | no | Omit to mark ready as soon as container starts |
+| `serviceSpec.selector` | yes (Service) | Label selector — must match pod labels |
+| `serviceSpec.port` | yes (Service) | Service port (informational) |
+| `serviceSpec.targetPort` | yes (Service) | Container port to reach |
+
+**Service manifest example:**
+
+```yaml
+kind: Service
+name: whoami
+namespace: default
+serviceSpec:
+  selector:
+    app: whoami
+  port: 80
+  targetPort: 80
+```
 
 ## Directory structure
 
@@ -296,7 +347,7 @@ tinykube/
 ├── cmd/
 │   ├── tinykube/       — control plane entry point (wires everything together)
 │   └── tkctl/          — kubectl-like CLI client
-├── api/v1/             — type definitions with yaml + json tags (Deployment, Pod, Manifest ...)
+├── api/v1/             — type definitions with yaml + json tags (Deployment, Pod, Service, Manifest ...)
 ├── store/              — in-memory KV store with watch (etcd substitute)
 ├── apiserver/
 │   ├── server.go       — HTTP REST handlers

@@ -42,12 +42,24 @@ type HealthCheckConfig struct {
 	HealthyThreshold   int           `yaml:"healthy_threshold"`
 }
 
+// DiscoveryConfig enables dynamic endpoint discovery via a tinykube Service.
+// When set, the static endpoints list is ignored and the pool is populated
+// by polling the tinykube endpoint API at the given interval.
+// This mirrors Envoy's EDS (Endpoint Discovery Service).
+type DiscoveryConfig struct {
+	TinykubeAddr string        `yaml:"tinykube_addr"`
+	Service      string        `yaml:"service"`
+	Namespace    string        `yaml:"namespace"`
+	Interval     time.Duration `yaml:"interval"`
+}
+
 // ClusterConfig mirrors Envoy's Cluster (static_resources.clusters).
 type ClusterConfig struct {
 	Name        string            `yaml:"name"`
 	LbPolicy    string            `yaml:"lb_policy"`
 	HealthCheck HealthCheckConfig `yaml:"health_check"`
 	Endpoints   []EndpointConfig  `yaml:"endpoints"`
+	Discovery   *DiscoveryConfig  `yaml:"discovery,omitempty"`
 }
 
 // RouteRule mirrors Envoy's Route (virtual_hosts[].routes[]).

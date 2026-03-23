@@ -62,6 +62,35 @@ func newTestServer(t *testing.T) *httptest.Server {
 		_ = json.NewEncoder(w).Encode(pods)
 	})
 
+	svc := api.Service{
+		Name:      "web-svc",
+		Namespace: "default",
+		Spec:      api.ServiceSpec{Selector: map[string]string{"app": "web"}, Port: 80, TargetPort: 80},
+	}
+	mux.HandleFunc("/apis/v1/namespaces/default/services", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]api.Service{svc})
+		case http.MethodPost:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(svc)
+		}
+	})
+	mux.HandleFunc("/apis/v1/namespaces/default/services/web-svc", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(svc)
+		case http.MethodPut:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(svc)
+		case http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	})
+
 	return httptest.NewServer(mux)
 }
 
@@ -156,5 +185,57 @@ func TestCmdUnknownCommand(t *testing.T) {
 	_, err := runCmd([]string{"unknown"})
 	if err == nil {
 		t.Error("expected error for unknown command")
+	}
+}
+
+func TestCmdGetServices(t *testing.T) {
+	srv := newTestServer(t)
+	defer srv.Close()
+
+	out, err := runCmd([]string{"get", "services", "--server", srv.URL, "--namespace", "default"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "web-svc") {
+		t.Errorf("expected web-svc in output, got: %s", out)
+	}
+	if !strings.Contains(out, "80") {
+		t.Errorf("expected port 80 in output, got: %s", out)
+	}
+}
+
+func TestCmdDeleteService(t *testing.T) {
+	srv := newTestServer(t)
+	defer srv.Close()
+
+	out, err := runCmd([]string{"delete", "service", "web-svc", "--server", srv.URL, "--namespace", "default"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "deleted") {
+		t.Errorf("expected 'deleted' in output, got: %s", out)
+	}
+}
+
+func TestCmdApplyServiceFile(t *testing.T) {
+	srv := newTestServer(t)
+	defer srv.Close()
+
+	path := writeTempManifest(t, `
+kind: Service
+name: web-svc
+namespace: default
+serviceSpec:
+  selector:
+    app: web
+  port: 80
+  targetPort: 80
+`)
+	out, err := runCmd([]string{"apply", "-f", path, "--server", srv.URL})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "web-svc") {
+		t.Errorf("expected web-svc in output, got: %s", out)
 	}
 }
