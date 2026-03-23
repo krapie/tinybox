@@ -358,6 +358,50 @@ Requires a `Dockerfile` that builds the `tinykube` binary.
 The container needs access to the Docker socket so `DockerRuntime` can manage
 sibling containers on the host Docker daemon.
 
+### 12. YAML Manifests (`api/v1/`, `cmd/tkctl/`, `manifests/`)
+
+Manifests are YAML files that describe a Deployment. `tkctl apply -f` reads the file
+and POST/PUTs it to the API server, enabling GitOps workflows with tinyargo.
+
+**Manifest format:**
+
+```yaml
+kind: Deployment
+name: nginx
+namespace: default
+spec:
+  replicas: 3
+  selector:
+    app: nginx
+  template:
+    labels:
+      app: nginx
+    spec:
+      image: nginx:alpine
+      port: 80
+      readinessProbe:
+        path: /
+        initialDelaySeconds: 2
+        periodSeconds: 2
+        failureThreshold: 3
+  strategy:
+    maxSurge: 1
+    maxUnavailable: 1
+```
+
+- `kind` must be `Deployment` (only supported kind for now)
+- `namespace` defaults to `default` if omitted
+- All `api/v1` types carry `yaml:` struct tags so the same types decode both YAML manifests and JSON API responses
+
+**CLI usage:**
+
+```bash
+tkctl apply -f manifests/nginx.yaml
+tkctl apply -f manifests/nginx.yaml --server http://localhost:8080
+```
+
+`apply -f` and `apply --flags` are mutually exclusive.
+
 ## Directory Structure
 
 ```
@@ -407,6 +451,7 @@ tinykube/
 ```
 github.com/docker/docker/client      ← Docker SDK
 github.com/docker/docker/api/types   ← Docker API types
+gopkg.in/yaml.v3                     ← YAML manifest parsing (M6)
 ```
 
 No other external dependencies. Standard library for HTTP, JSON, etc.
@@ -443,6 +488,13 @@ No other external dependencies. Standard library for HTTP, JSON, etc.
 - [x] API server HTTP access log middleware (method, path, status, size, duration)
 - [x] `tkctl` CLI with apply / get / delete / status commands
 - [x] `Dockerfile` + `docker-compose.yml` for containerized deployment
+
+### M6 — YAML Manifests
+- [ ] `yaml` struct tags added to all `api/v1` types
+- [ ] `Manifest` envelope type (`kind`, `name`, `namespace`, `spec`)
+- [ ] `tkctl apply -f <file.yaml>` — parse manifest, POST or PUT to API server
+- [ ] Example manifests in `manifests/`
+- Tests written first for YAML parsing and the `-f` code path
 
 ## Test Strategy
 

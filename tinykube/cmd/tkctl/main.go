@@ -55,8 +55,9 @@ func cmdApply(args []string) (string, error) {
 	fs := flag.NewFlagSet("apply", flag.ContinueOnError)
 	server := fs.String("server", defaultServer, "tinykube API server address")
 	ns := fs.String("namespace", defaultNamespace, "namespace")
-	name := fs.String("name", "", "deployment name (required)")
-	image := fs.String("image", "", "container image (required)")
+	file := fs.String("f", "", "path to a YAML manifest file")
+	name := fs.String("name", "", "deployment name")
+	image := fs.String("image", "", "container image")
 	replicas := fs.Int("replicas", 1, "number of replicas")
 	port := fs.Int("port", 80, "container port")
 	maxSurge := fs.Int("max-surge", 1, "max surge during rolling update")
@@ -65,32 +66,58 @@ func cmdApply(args []string) (string, error) {
 	if err := fs.Parse(args); err != nil {
 		return "", err
 	}
-	if *name == "" || *image == "" {
-		return "", fmt.Errorf("--name and --image are required")
+
+	// -f and --name are mutually exclusive
+	if *file != "" && *name != "" {
+		return "", fmt.Errorf("-f and --name are mutually exclusive — use one or the other")
 	}
 
-	dep := api.Deployment{
-		Name:      *name,
-		Namespace: *ns,
-		Spec: api.DeploymentSpec{
-			Replicas: *replicas,
-			Selector: map[string]string{"app": *name},
-			Template: api.PodTemplate{
-				Labels: map[string]string{"app": *name},
-				Spec:   api.PodSpec{Image: *image, Port: *port},
+	var dep api.Deployment
+
+	if *file != "" {
+		// Manifest mode: parse YAML file.
+		parsed, err := parseManifestFile(*file)
+		if err != nil {
+			return "", err
+		}
+		dep = *parsed
+		// --server and --namespace flags still apply as overrides.
+		if *ns != defaultNamespace {
+			dep.Namespace = *ns
+		}
+	} else {
+		// Flag mode: build from explicit flags.
+		if *name == "" || *image == "" {
+			return "", fmt.Errorf("--name and --image are required (or use -f <manifest.yaml>)")
+		}
+		dep = api.Deployment{
+			Name:      *name,
+			Namespace: *ns,
+			Spec: api.DeploymentSpec{
+				Replicas: *replicas,
+				Selector: map[string]string{"app": *name},
+				Template: api.PodTemplate{
+					Labels: map[string]string{"app": *name},
+					Spec:   api.PodSpec{Image: *image, Port: *port},
+				},
+				Strategy: api.RollingUpdateStrategy{
+					MaxSurge:       *maxSurge,
+					MaxUnavailable: *maxUnavailable,
+				},
 			},
-			Strategy: api.RollingUpdateStrategy{
-				MaxSurge:       *maxSurge,
-				MaxUnavailable: *maxUnavailable,
-			},
-		},
+		}
 	}
 
+	return applyDeployment(*server, &dep)
+}
+
+// applyDeployment creates or updates a deployment via the API server.
+func applyDeployment(server string, dep *api.Deployment) (string, error) {
 	body, _ := json.Marshal(dep)
-	base := fmt.Sprintf("%s/apis/apps/v1/namespaces/%s/deployments", *server, *ns)
+	base := fmt.Sprintf("%s/apis/apps/v1/namespaces/%s/deployments", server, dep.Namespace)
 
-	// Try GET to check existence; PUT to update, POST to create.
-	checkResp, err := http.Get(base + "/" + *name)
+	// Check if it already exists.
+	checkResp, err := http.Get(base + "/" + dep.Name)
 	if err != nil {
 		return "", fmt.Errorf("connecting to server: %w", err)
 	}
@@ -98,8 +125,7 @@ func cmdApply(args []string) (string, error) {
 
 	var result api.Deployment
 	if checkResp.StatusCode == http.StatusOK {
-		// Deployment exists — update.
-		r, err := doRequest(http.MethodPut, base+"/"+*name, bytes.NewReader(body))
+		r, err := doRequest(http.MethodPut, base+"/"+dep.Name, bytes.NewReader(body))
 		if err != nil {
 			return "", err
 		}
@@ -109,7 +135,6 @@ func cmdApply(args []string) (string, error) {
 		return fmt.Sprintf("deployment/%s updated\n", result.Name), nil
 	}
 
-	// Create.
 	r, err := doRequest(http.MethodPost, base, bytes.NewReader(body))
 	if err != nil {
 		return "", err

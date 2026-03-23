@@ -6,13 +6,13 @@ system works under the hood.
 
 ## Projects
 
-| Project   | Models After | Core Feature                              |
-|-----------|-------------|-------------------------------------------|
-| tinykube  | Kubernetes  | Deployment reconciliation + rolling update |
-| tinyargo  | ArgoCD      | GitOps sync from a git repository         |
-| tinydns   | CoreDNS     | Service discovery + plugin chain          |
-| tinyprom  | Prometheus  | Metrics scraping + TSDB + alerting        |
-| tinyenvoy | Envoy       | L7 proxy with routing, retries, observability |
+| Project   | Models After      | Core Feature                              |
+|-----------|------------------|-------------------------------------------|
+| tinykube  | Kubernetes        | Deployment reconciliation + rolling update |
+| tinyargo  | ArgoCD            | GitOps sync from a git repository         |
+| tinydns   | CoreDNS           | Service discovery + plugin chain          |
+| tinyotel  | OpenTelemetry     | OTLP receiver + traces + metrics + logs   |
+| tinyenvoy | Envoy             | L7 proxy with routing, retries, observability |
 
 ## Principles
 
@@ -26,10 +26,10 @@ system works under the hood.
 
 ```
 1. tinykube  — foundation; others integrate with it
-2. tinyprom  — independent; useful for observability immediately
+2. tinyotel  — independent; observability pipeline immediately useful
 3. tinydns   — independent; DNS layer
 4. tinyargo  — ties everything together; syncs manifests to tinykube
-5. tinyenvoy — sits in front of tinykube pods; proxies and observes traffic
+5. tinyenvoy — sits in front of tinykube pods; exports OTLP spans to tinyotel
 ```
 
 ## Demo
@@ -38,4 +38,4 @@ A `docker-compose` in the root will wire all five together:
 - tinyargo syncs a Deployment manifest to tinykube
 - tinydns resolves the service name
 - tinyenvoy proxies inbound traffic to the pods, applying routing rules
-- tinyprom scrapes metrics from all components (including tinyenvoy request metrics)
+- tinyotel receives OTLP traces and metrics from all components (tinyenvoy exports spans natively)

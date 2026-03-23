@@ -1,0 +1,21 @@
+kind: Deployment
+name: nginx
+namespace: default
+spec:
+  replicas: 3
+  selector:
+    app: nginx
+  template:
+    labels:
+      app: nginx
+    spec:
+      image: nginx:alpine
+      port: 80
+      readinessProbe:
+        path: /
+        initialDelaySeconds: 2
+        periodSeconds: 2
+        failureThreshold: 3
+  strategy:
+    maxSurge: 1
+    maxUnavailable: 1

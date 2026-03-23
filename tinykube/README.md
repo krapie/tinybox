@@ -114,14 +114,28 @@ go build -o tkctl ./cmd/tkctl/
 
 ### Create / update a deployment
 
+**From a YAML manifest (recommended — used by tinyargo for GitOps):**
+
+```bash
+tkctl apply -f manifests/nginx.yaml
+# deployment/nginx created
+
+# Edit the manifest (e.g. change image to nginx:1.27) then re-apply
+tkctl apply -f manifests/nginx.yaml
+# deployment/nginx updated
+```
+
+**From flags (quick one-liners):**
+
 ```bash
 tkctl apply --name nginx --image nginx:alpine --replicas 3 --port 80
 # deployment/nginx created
 
-# Update image (triggers rolling update)
 tkctl apply --name nginx --image nginx:1.27 --replicas 3 --port 80
 # deployment/nginx updated
 ```
+
+`-f` and `--name` are mutually exclusive.
 
 ### List resources
 
@@ -232,6 +246,44 @@ go test -tags=integration ./runtime/...
 
 Unit tests use `FakeRuntime` — an in-memory runtime that instantly transitions pods to `Running` and tracks `CreatePod`/`DeletePod` call counts. All components accept `logger.NewNop()` in tests so no output noise.
 
+## Manifest format
+
+Manifests live in `manifests/` and are applied with `tkctl apply -f`. They are also what tinyargo will sync from a git repo in a GitOps workflow.
+
+```yaml
+kind: Deployment
+name: nginx
+namespace: default
+spec:
+  replicas: 3
+  selector:
+    app: nginx
+  template:
+    labels:
+      app: nginx
+    spec:
+      image: nginx:alpine
+      port: 80
+      readinessProbe:
+        path: /
+        initialDelaySeconds: 2
+        periodSeconds: 2
+        failureThreshold: 3
+  strategy:
+    maxSurge: 1
+    maxUnavailable: 1
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `kind` | yes | Must be `Deployment` |
+| `name` | yes | Deployment name |
+| `namespace` | no | Defaults to `default` |
+| `spec.replicas` | yes | Desired pod count |
+| `spec.strategy.maxSurge` | yes | Extra pods allowed during rolling update |
+| `spec.strategy.maxUnavailable` | yes | Pods allowed unavailable during rolling update |
+| `spec.template.spec.readinessProbe` | no | Omit to mark ready as soon as container starts |
+
 ## Directory structure
 
 ```
@@ -239,7 +291,7 @@ tinykube/
 ├── cmd/
 │   ├── tinykube/       — control plane entry point (wires everything together)
 │   └── tkctl/          — kubectl-like CLI client
-├── api/v1/             — type definitions (Deployment, Pod, PodSpec, ...)
+├── api/v1/             — type definitions with yaml + json tags (Deployment, Pod, Manifest ...)
 ├── store/              — in-memory KV store with watch (etcd substitute)
 ├── apiserver/
 │   ├── server.go       — HTTP REST handlers
@@ -251,7 +303,8 @@ tinykube/
 │   ├── fake_runtime.go — in-memory fake for unit tests
 │   └── watcher.go      — background readiness polling goroutine
 ├── logger/             — two-level logger (Info/Debug), NewNop for tests
-├── scheduler/          — round-robin pod scheduler (stub for M1–M5)
+├── scheduler/          — round-robin pod scheduler (stub for M1–M6)
+├── manifests/          — example YAML manifests (nginx.yaml, whoami.yaml)
 ├── Dockerfile          — multi-stage build (golang:1.23 + GOTOOLCHAIN=auto)
 └── docker-compose.yml  — single-service stack with Docker socket mount
 ```

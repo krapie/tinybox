@@ -8,13 +8,13 @@ tinybox is a collection of toy implementations of modern cloud native infrastruc
 built for study and potentially used for a home server. Each project is a simplified
 clone of a real CNCF project, written in Go.
 
-| Project   | Models After | SPEC |
-|-----------|-------------|------|
-| tinykube  | Kubernetes  | [tinykube/SPEC.md](./tinykube/SPEC.md) |
-| tinyprom  | Prometheus  | [tinyprom/SPEC.md](./tinyprom/SPEC.md) |
-| tinydns   | CoreDNS     | [tinydns/SPEC.md](./tinydns/SPEC.md) |
-| tinyargo  | ArgoCD      | [tinyargo/SPEC.md](./tinyargo/SPEC.md) |
-| tinyenvoy | Envoy       | [tinyenvoy/SPEC.md](./tinyenvoy/SPEC.md) |
+| Project   | Models After      | SPEC |
+|-----------|------------------|------|
+| tinykube  | Kubernetes        | [tinykube/SPEC.md](./tinykube/SPEC.md) |
+| tinyotel  | OpenTelemetry     | [tinyotel/SPEC.md](./tinyotel/SPEC.md) |
+| tinydns   | CoreDNS           | [tinydns/SPEC.md](./tinydns/SPEC.md) |
+| tinyargo  | ArgoCD            | [tinyargo/SPEC.md](./tinyargo/SPEC.md) |
+| tinyenvoy | Envoy             | [tinyenvoy/SPEC.md](./tinyenvoy/SPEC.md) |
 
 ## Before Starting Any Task
 
@@ -71,5 +71,5 @@ Never commit implementation changes without updating both files in the same comm
 If unsure which project to work on next, follow this order:
 
 ```
-1. tinykube  → 2. tinyprom  → 3. tinydns  → 4. tinyargo  → 5. tinyenvoy
+1. tinykube  → 2. tinyotel  → 3. tinydns  → 4. tinyargo  → 5. tinyenvoy
 ```
