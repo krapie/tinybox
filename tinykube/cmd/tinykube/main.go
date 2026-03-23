@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,6 +16,9 @@ import (
 )
 
 func main() {
+	addr := flag.String("addr", ":8080", "API server listen address")
+	flag.Parse()
+
 	log := logger.New(true) // debug enabled by default
 	log.Info("Starting tinykube...")
 
@@ -39,8 +43,7 @@ func main() {
 
 	// Start the API server.
 	srv := apiserver.New(s)
-	addr := ":8080"
-	log.Info("API server listening on %s", addr)
+	log.Info("API server listening on %s", *addr)
 
 	// Graceful shutdown on SIGINT/SIGTERM.
 	sigCh := make(chan os.Signal, 1)
@@ -52,7 +55,7 @@ func main() {
 		cancel()
 	}()
 
-	if err := srv.ListenAndServe(addr); err != nil {
+	if err := srv.ListenAndServe(*addr); err != nil {
 		log.Info("API server error: %v", err)
 		os.Exit(1)
 	}

@@ -13,7 +13,7 @@
 #   tinykube-whoami-g5h6i  (172.19.0.4)
 
 listener:
-  addr: ":8080"
+  addr: ":8888"
   tls:
     enabled: false
 
@@ -30,9 +30,9 @@ clusters:
       unhealthy_threshold: 3
       healthy_threshold: 2
     endpoints:
-      - addr: tinykube-whoami-a1b2c:80
-      - addr: tinykube-whoami-d3e4f:80
-      - addr: tinykube-whoami-g5h6i:80
+      - addr: localhost:59331
+      - addr: localhost:59338
+      - addr: localhost:59346
 
 routes:
   - virtual_host: "*"
