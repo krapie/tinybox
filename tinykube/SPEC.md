@@ -489,11 +489,11 @@ No other external dependencies. Standard library for HTTP, JSON, etc.
 - [x] `tkctl` CLI with apply / get / delete / status commands
 - [x] `Dockerfile` + `docker-compose.yml` for containerized deployment
 
-### M6 — YAML Manifests
-- [ ] `yaml` struct tags added to all `api/v1` types
-- [ ] `Manifest` envelope type (`kind`, `name`, `namespace`, `spec`)
-- [ ] `tkctl apply -f <file.yaml>` — parse manifest, POST or PUT to API server
-- [ ] Example manifests in `manifests/`
+### M6 — YAML Manifests ✓
+- [x] `yaml` struct tags added to all `api/v1` types
+- [x] `Manifest` envelope type (`kind`, `name`, `namespace`, `spec`)
+- [x] `tkctl apply -f <file.yaml>` — parse manifest, POST or PUT to API server
+- [x] Example manifests in `manifests/`
 - Tests written first for YAML parsing and the `-f` code path
 
 ## Test Strategy
@@ -699,3 +699,82 @@ tinykube/
 | Pod scheduling onto nodes | Scheduler setting `pod.NodeName` |
 | Kubelet as the real container manager | DockerRuntime moves into kubelet |
 | Node failure and pod eviction | Node controller + heartbeat timeout |
+
+---
+
+## Roadmap: Authentication
+
+> Future milestone — adds a Kubernetes-style authn/authz layer to the API server so
+> that `tkctl` and HTTP clients must prove identity before mutating cluster state.
+
+### What Kubernetes Does
+
+Kubernetes authenticates requests via **bearer tokens**, **client certificates**, or
+**service account tokens** (JWTs). Authorization is handled separately by RBAC.
+tinykube will model a simplified version:
+
+- **Bearer token authn** — `Authorization: Bearer <token>` header validated against
+  a static token file (analogous to Kubernetes' `--token-auth-file` flag)
+- **RBAC-lite authz** — per-token verb restrictions (`get`, `create`, `update`, `delete`)
+  scoped to resource types (`deployments`, `pods`)
+
+### Design
+
+```
+tkctl / curl
+    │
+    │  Authorization: Bearer <token>
+    ▼
+┌──────────────────────────────┐
+│  API Server                  │
+│  ┌────────────────────────┐  │
+│  │  AuthnMiddleware       │  │  ← validate token → identity
+│  └──────────┬─────────────┘  │
+│             │                │
+│  ┌──────────▼─────────────┐  │
+│  │  AuthzMiddleware       │  │  ← check verb + resource allowed
+│  └──────────┬─────────────┘  │
+│             │                │
+│         handlers             │
+└──────────────────────────────┘
+```
+
+### Token File Format
+
+```yaml
+tokens:
+  - token: "admin-secret-token"
+    identity: admin
+    verbs: ["*"]           # all verbs on all resources
+  - token: "readonly-token"
+    identity: reader
+    verbs: ["get"]         # read-only
+```
+
+### Roadmap Milestones
+
+#### A1 — Bearer Token Authentication
+- [ ] `auth/token.go` — load token file, map token → identity
+- [ ] `apiserver/authn.go` — middleware: extract `Authorization: Bearer` header, reject 401 if missing/invalid
+- [ ] `tkctl` — `--token` flag (or `TKCTL_TOKEN` env var) adds header to every request
+- Tests written first (valid token, missing token, invalid token)
+
+#### A2 — RBAC-lite Authorization
+- [ ] `auth/rbac.go` — per-identity verb allowlist
+- [ ] `apiserver/authz.go` — middleware: map HTTP method → verb (`GET→get`, `POST→create`, etc.), check policy, reject 403 if denied
+- Tests: admin can create, reader blocked on POST/PUT/DELETE
+
+#### A3 — Service Account Tokens (stretch)
+- [ ] JWT-signed tokens with `sub` (identity) and `exp` (expiry)
+- [ ] API server validates signature with a configured signing key
+- [ ] Pods can be injected with a service account token (analogous to Kubernetes' projected volume)
+
+### What You Learn
+
+| Concept | Where |
+|---|---|
+| Kubernetes authn plugins (bearer token, cert, SA) | `auth/token.go` |
+| Middleware chain in the API server | `apiserver/authn.go`, `apiserver/authz.go` |
+| RBAC verb/resource model | `auth/rbac.go` |
+| Separation of authn vs authz | Two independent middleware layers |
+| JWT service account tokens | `auth/jwt.go` (A3) |
