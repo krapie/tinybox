@@ -2,7 +2,7 @@
 
 A toy Envoy L7 proxy implementation — virtual-host routing, round-robin + ring-hash load balancing, active health checks, Prometheus metrics, and hot-reload.
 
-Built as part of [tinybox](../README.md), a collection of simplified CNCF project implementations for study.
+Built as part of [tinybox](../README.md), a collection of simplified infrastructure and tooling implementations for study.
 
 ## What it teaches
 

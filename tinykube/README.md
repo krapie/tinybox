@@ -2,7 +2,7 @@
 
 A toy Kubernetes implementation — Deployment controller with pod replica reconciliation and rolling updates. Pods are real Docker containers.
 
-Built as part of [tinybox](../README.md), a collection of simplified CNCF project implementations for study.
+Built as part of [tinybox](../README.md), a collection of simplified infrastructure and tooling implementations for study.
 
 ## What it teaches
 

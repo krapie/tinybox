@@ -1,8 +1,8 @@
 # tinybox
 
-A collection of simplified, study-purpose implementations of core CNCF projects.
-Each project implements only the essential feature set to understand how the real
-system works under the hood.
+A collection of simplified, study-purpose implementations of modern infrastructure
+and developer tooling. Each project implements only the essential feature set to
+understand how the real system works under the hood.
 
 ## Projects
 
@@ -18,7 +18,7 @@ system works under the hood.
 
 - **Test first**: write tests before implementation for every component.
 - **Minimal scope**: implement only what the spec describes — no extras.
-- **Go**: all projects are written in Go, mirroring real CNCF project language choices.
+- **Go**: all projects are written in Go.
 - **No external dependencies** beyond the standard library and one or two focused libs
   (e.g. `miekg/dns` for tinydns, `go-git` for tinyargo, `net/http` reverse proxy for tinyenvoy).
 

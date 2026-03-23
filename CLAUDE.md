@@ -4,9 +4,9 @@ Project-level instructions for Claude. These override any default behavior.
 
 ## Project Overview
 
-tinybox is a collection of toy implementations of modern cloud native infrastructure,
-built for study and potentially used for a home server. Each project is a simplified
-clone of a real CNCF project, written in Go.
+tinybox is a collection of toy implementations of modern infrastructure and developer
+tooling, built for study and potentially used for a home server. Each project is a
+simplified clone of a real-world system, written in Go.
 
 | Project   | Models After      | SPEC |
 |-----------|------------------|------|
