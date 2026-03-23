@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+
+# Go binaries (project-named executables)
+tinykube/tinykube
+tinyenvoy/tinyenvoy
+tinydns/tinydns
+tinyargo/tinyargo
+tinyotel/tinyotel
+
+# Go build artifacts
+*.test
+*.out
+/vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# Environment
+.env
+*.env
+
+# Logs
+*.log
