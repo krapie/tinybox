@@ -1,0 +1,46 @@
+version: "3.8"
+
+# tinybox sample stack — tinykube + tinyenvoy on a shared Docker network.
+#
+# tinykube manages pod lifecycle (real Docker containers).
+# tinyenvoy proxies inbound traffic to tinykube-managed pods.
+#
+# Usage:
+#   docker compose up -d
+#   # Deploy whoami pods via tinykube API:
+#   docker compose exec tinykube tkctl apply -f /manifests/whoami.yaml
+#   # After pods are Running, update envoy-config.yaml with pod names
+#   # and restart tinyenvoy to pick up the new endpoints.
+
+services:
+  tinykube:
+    build:
+      context: ../tinykube
+      dockerfile: Dockerfile
+    ports:
+      - "8090:8080"   # tinykube API server
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./manifests:/manifests:ro
+    networks:
+      - tinybox
+
+  tinyenvoy:
+    build:
+      context: ../tinyenvoy
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"   # proxy ingress
+      - "9090:9090"   # Prometheus /metrics
+    volumes:
+      - ./envoy-config.yaml:/config.yaml:ro
+    command: ["-config", "/config.yaml"]
+    networks:
+      - tinybox
+      - tinykube-default  # same network as tinykube pods
+
+networks:
+  tinybox:
+    driver: bridge
+  tinykube-default:
+    external: true   # created automatically by tinykube for namespace=default

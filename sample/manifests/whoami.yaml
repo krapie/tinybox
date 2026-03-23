@@ -1,0 +1,21 @@
+kind: Deployment
+name: whoami
+namespace: default
+spec:
+  replicas: 3
+  selector:
+    app: whoami
+  template:
+    labels:
+      app: whoami
+    spec:
+      image: traefik/whoami
+      port: 80
+      readinessProbe:
+        path: /health
+        initialDelaySeconds: 1
+        periodSeconds: 2
+        failureThreshold: 3
+  strategy:
+    maxSurge: 1
+    maxUnavailable: 1

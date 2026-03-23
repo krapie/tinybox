@@ -1,0 +1,41 @@
+# tinyenvoy config for the tinybox sample
+#
+# tinyenvoy runs on the tinykube Docker network (tinykube-default) so it can
+# reach pods by their container name. Each tinykube pod is named
+# tinykube-{pod-name} and listens on port 80 inside the network.
+#
+# Update `endpoints` below with actual pod names after running:
+#   tkctl get pods
+#
+# Example — pods created by tinykube for the whoami deployment:
+#   tinykube-whoami-a1b2c  (172.19.0.2)
+#   tinykube-whoami-d3e4f  (172.19.0.3)
+#   tinykube-whoami-g5h6i  (172.19.0.4)
+
+listener:
+  addr: ":8080"
+  tls:
+    enabled: false
+
+admin:
+  addr: ":9090"
+
+clusters:
+  - name: whoami
+    lb_policy: round-robin
+    health_check:
+      path: /health
+      interval: 10s
+      timeout: 2s
+      unhealthy_threshold: 3
+      healthy_threshold: 2
+    endpoints:
+      - addr: tinykube-whoami-a1b2c:80
+      - addr: tinykube-whoami-d3e4f:80
+      - addr: tinykube-whoami-g5h6i:80
+
+routes:
+  - virtual_host: "*"
+    routes:
+      - prefix: /
+        cluster: whoami
