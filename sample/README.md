@@ -2,23 +2,23 @@
 
 End-to-end demo showing **tinykube** + **tinyenvoy** working together.
 
-tinykube manages the pod lifecycle (real Docker containers). tinyenvoy sits in front as the L7 proxy, routing and load-balancing across the pods.
+tinykube manages the pod lifecycle (real Docker containers) and exposes a Service endpoint API. tinyenvoy sits in front as the L7 proxy — it discovers live backends automatically from the tinykube Service API (EDS analogue) and routes traffic across them with round-robin load balancing.
 
 ## What this demonstrates
 
 | Step | Component | What you see |
 |---|---|---|
 | Deploy | tinykube | Reconciliation loop creates 3 whoami pods |
-| Inspect | tkctl | `get pods` shows pods Running with IP addresses |
-| Route | tinyenvoy | Round-robin load balancing across the 3 pods |
-| Update | tkctl | Rolling update changes image, zero downtime |
+| Service | tkctl | Service object registers selector; endpoint API returns live pod addresses |
+| Route | tinyenvoy | Discovers backends via Service API; round-robin load balancing |
+| Update | tkctl | Rolling update changes image; tinyenvoy re-syncs backends automatically |
 | Metrics | tinyenvoy | Prometheus counters + latency histograms |
 
 ## Prerequisites
 
 - Docker Desktop running
 - Go 1.23+
-- `tkctl` built: `go build -o tkctl ./tinykube/cmd/tkctl/`
+- `tkctl` built: `cd tinykube && go build -o tkctl ./cmd/tkctl/`
 
 ## Option A — Step by step (recommended for learning)
 
@@ -46,44 +46,47 @@ tkctl get pods
 # whoami-g5h6i        Running   172.19.0.4   traefik/whoami
 ```
 
-### 3. Find the host ports
+### 3. Create a Service
 
-Tinykube pods are exposed on random host ports. Find them:
-
-```bash
-docker ps --filter "label=tinykube=true" --format "table {{.Names}}\t{{.Ports}}"
-# tinykube-whoami-a1b2c   0.0.0.0:52410->80/tcp
-# tinykube-whoami-d3e4f   0.0.0.0:52411->80/tcp
-# tinykube-whoami-g5h6i   0.0.0.0:52412->80/tcp
-```
-
-Test a pod directly:
+Create the Service so tinyenvoy can discover pod endpoints by label selector:
 
 ```bash
-curl http://localhost:52410/
-# Hostname: tinykube-whoami-a1b2c
-# IP: 172.19.0.2
-# ...
+tkctl apply -f sample/manifests/whoami-svc.yaml
+# service/whoami created
+
+tkctl get services
+# NAME     NAMESPACE   PORT   SELECTOR
+# whoami   default     80     app=whoami
 ```
 
-### 4. Start tinyenvoy (routing to the pods)
+Check the endpoint discovery API directly:
 
-Update `sample/envoy-config.yaml` with the host ports from above, then:
+```bash
+curl http://localhost:8080/apis/v1/namespaces/default/services/whoami/endpoints
+# [{"podName":"whoami-a1b2c","addr":"localhost:52410"},
+#  {"podName":"whoami-d3e4f","addr":"localhost:52411"},
+#  {"podName":"whoami-g5h6i","addr":"localhost:52412"}]
+```
+
+The API returns only Running pods matching the selector — `localhost:{hostPort}` addresses that are reachable from the host (needed on macOS where container IPs are inside the Docker VM).
+
+### 4. Start tinyenvoy (auto-discovery mode)
 
 ```bash
 cd tinyenvoy
 go run ./cmd/envoy -config ../sample/envoy-config.yaml
-# INFO tinyenvoy listening addr=:8080
-# INFO admin listening addr=:9090
+# INFO tinyenvoy listening  addr=:8888
+# INFO admin listening      addr=:9090
+# INFO service discovery started  cluster=whoami service=whoami namespace=default interval=5s
 ```
 
-> **Note:** On macOS, tinykube uses host-mapped ports because Docker containers run inside a VM and their IPs (172.x.x.x) are not reachable from the host. Update `envoy-config.yaml` to use `localhost:{hostPort}` for each endpoint.
+tinyenvoy polls the tinykube endpoint API every 5 seconds and keeps its backend pool in sync — no manual configuration of host ports required.
 
 ### 5. Route through tinyenvoy
 
 ```bash
 # Round-robin across all 3 pods
-for i in {1..6}; do curl -s http://localhost:8080/ | grep Hostname; done
+for i in {1..6}; do curl -s http://localhost:8888/ | grep Hostname; done
 # Hostname: tinykube-whoami-a1b2c
 # Hostname: tinykube-whoami-d3e4f
 # Hostname: tinykube-whoami-g5h6i
@@ -99,68 +102,105 @@ curl http://localhost:9090/metrics | grep tinyenvoy
 # tinyenvoy_request_duration_seconds_sum{...} 0.012
 ```
 
-### 7. Rolling update (zero downtime)
+### 7. Rolling update (auto-resync)
 
 ```bash
-# Edit sample/manifests/whoami.yaml to bump the image version, then:
-tkctl apply -f sample/manifests/whoami.yaml
+tkctl apply --name whoami --image traefik/whoami:v1.10 --replicas 3 --port 80
 # deployment/whoami updated
 
-# Watch the rolling update — tinyenvoy keeps serving during the update
+# Watch pods flip to v1.10 (tinykube reconciler does the rolling update)
 watch -n1 "tkctl get pods"
+
+# tinyenvoy automatically picks up the new pod addresses on the next discovery poll
+# No config change required — just keep sending traffic
+for i in {1..6}; do curl -s http://localhost:8888/ | grep Hostname; done
 ```
 
-### 8. Scale down
+### 8. Clean up
 
 ```bash
 tkctl delete deployment whoami
 # deployment/whoami deleted
+
+tkctl delete service whoami
+# service/whoami deleted
 ```
 
-## Option B — docker compose
+## Option B — automated e2e test
+
+The e2e test script exercises all the above steps end-to-end and verifies 22 assertions:
 
 ```bash
 cd sample
-docker compose up -d
-docker compose logs -f
+bash e2e_test.sh
 ```
 
-After the stack is up, deploy the whoami manifest:
+Output:
+```
+=== 0. Build ===
+  ✓ tkctl built
+  ✓ tinyenvoy built
 
-```bash
-# Apply manifest via the tinykube API container
-curl -X POST http://localhost:8090/apis/apps/v1/namespaces/default/deployments \
-  -H 'Content-Type: application/json' \
-  -d "$(cat manifests/whoami.yaml | python3 -c '
-import sys, yaml, json
-m = yaml.safe_load(sys.stdin)
-d = {"name": m["name"], "namespace": m.get("namespace","default"), "spec": m["spec"]}
-print(json.dumps(d))
-')"
+=== 2. Deploy whoami (3 replicas) ===
+  ✓ 3 pods Running
+
+=== 3. Service resource + endpoint discovery API (S1/S2) ===
+  ✓ service created via tkctl
+  ✓ tkctl get services shows whoami
+  ✓ endpoint API returns 3 endpoints (want ≥3)
+  ✓ endpoint addrs are localhost:{port}
+
+=== 4. Start tinyenvoy (discovery mode, S3) ===
+  ✓ tinyenvoy proxy ready
+
+=== 5. Round-robin routing ===
+  ✓ round-robin hit 3 distinct backends
+
+...
+
+  Results: 22 passed, 0 failed
 ```
 
 ## Architecture
 
 ```
-                    ┌─────────────────────────────────┐
-                    │          tinyenvoy              │
-  :8080 ──────────▶ │  round-robin load balancer      │
-                    │  Prometheus metrics → :9090     │
-                    └──────────────┬──────────────────┘
-                                   │
-               ┌───────────────────┼───────────────────┐
-               ▼                   ▼                   ▼
-        ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-        │ whoami pod 1 │  │ whoami pod 2 │  │ whoami pod 3 │
-        │ (Docker ctr) │  │ (Docker ctr) │  │ (Docker ctr) │
-        └──────────────┘  └──────────────┘  └──────────────┘
-               ▲                   ▲                   ▲
-               └───────────────────┼───────────────────┘
-                                   │
-                    ┌──────────────┴──────────────────┐
-                    │          tinykube               │
-                    │  reconciliation loop            │
-                    │  readiness probes               │
-                    │  rolling update                 │
-                    └─────────────────────────────────┘
+  curl / browser
+       │
+       ▼ :8888
+┌──────────────────────────────────────┐
+│             tinyenvoy                │
+│  round-robin load balancer           │
+│  Prometheus metrics → :9090          │
+│                                      │
+│  ┌────────────────────────────────┐  │
+│  │ discovery (EDS analogue)       │  │
+│  │ polls tinykube /endpoints      │  │
+│  │ every 5s, diffs backend pool   │  │
+│  └──────────────┬─────────────────┘  │
+└─────────────────│────────────────────┘
+                  │ /apis/v1/.../endpoints
+                  ▼ :8080
+┌──────────────────────────────────────┐
+│             tinykube                 │
+│  reconciliation loop                 │
+│  readiness probes                    │
+│  rolling update                      │
+│  Service + endpoint API              │
+└──────────────────────────────────────┘
+       │         │         │
+       ▼         ▼         ▼
+┌──────────┐ ┌──────────┐ ┌──────────┐
+│whoami-1  │ │whoami-2  │ │whoami-3  │
+│(Docker)  │ │(Docker)  │ │(Docker)  │
+└──────────┘ └──────────┘ └──────────┘
 ```
+
+tinyenvoy never talks directly to the Docker daemon — it discovers backend addresses through the tinykube Service API, the same way Envoy EDS works in production (but via HTTP polling instead of gRPC streaming).
+
+## Manifest files
+
+| File | Kind | Purpose |
+|---|---|---|
+| `manifests/whoami.yaml` | Deployment | 3-replica whoami deployment with readiness probe |
+| `manifests/whoami-svc.yaml` | Service | Selector `app=whoami`, port 80 |
+| `envoy-config.yaml` | tinyenvoy config | Discovery mode — polls tinykube for `whoami` endpoints |

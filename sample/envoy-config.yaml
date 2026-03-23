@@ -1,19 +1,17 @@
-# tinyenvoy config for the tinybox sample
+# tinyenvoy config for the tinybox sample — service discovery mode
 #
-# tinyenvoy runs on the tinykube Docker network (tinykube-default) so it can
-# reach pods by their container name. Each tinykube pod is named
-# tinykube-{pod-name} and listens on port 80 inside the network.
+# tinyenvoy discovers whoami pod endpoints automatically by polling the
+# tinykube Service API. No manual port lookup needed.
 #
-# Update `endpoints` below with actual pod names after running:
-#   tkctl get pods
+# Prerequisites:
+#   1. tinykube running on :8080
+#   2. whoami deployment running (tkctl apply -f manifests/whoami.yaml)
+#   3. whoami Service created  (tkctl apply -f manifests/whoami-svc.yaml)
 #
-# Example — pods created by tinykube for the whoami deployment:
-#   tinykube-whoami-a1b2c  (172.19.0.2)
-#   tinykube-whoami-d3e4f  (172.19.0.3)
-#   tinykube-whoami-g5h6i  (172.19.0.4)
+# Then: go run ./cmd/envoy -config ../sample/envoy-config.yaml
 
 listener:
-  addr: ":8080"
+  addr: ":8888"
   tls:
     enabled: false
 
@@ -25,14 +23,15 @@ clusters:
     lb_policy: round-robin
     health_check:
       path: /health
-      interval: 10s
+      interval: 5s
       timeout: 2s
       unhealthy_threshold: 3
       healthy_threshold: 2
-    endpoints:
-      - addr: localhost:60947
-      - addr: localhost:60942
-      - addr: localhost:60938
+    discovery:
+      tinykube_addr: http://localhost:8080   # tinykube API server
+      service: whoami                        # tinykube Service name
+      namespace: default
+      interval: 5s                           # how often to poll /endpoints
 
 routes:
   - virtual_host: "*"

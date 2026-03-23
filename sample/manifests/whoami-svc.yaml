@@ -1,0 +1,8 @@
+kind: Service
+name: whoami
+namespace: default
+serviceSpec:
+  selector:
+    app: whoami
+  port: 80
+  targetPort: 80

@@ -183,7 +183,7 @@ func buildClusters(ctx context.Context, cfg *config.Config, reg *metrics.Registr
 				discoveryCfg.Interval = 10 * time.Second
 			}
 			client := discovery.NewClient(cc.Discovery.TinykubeAddr)
-			discovery.Start(ctx, client, pool, discoveryCfg)
+			discovery.Start(ctx, client, pool, lb, discoveryCfg)
 			logger.Info("service discovery started",
 				"cluster", cc.Name,
 				"service", cc.Discovery.Service,

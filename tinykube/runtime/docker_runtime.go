@@ -210,16 +210,29 @@ func (d *DockerRuntime) IsReady(ctx context.Context, pod *api.Pod) bool {
 		return false
 	}
 
+	// Inspect to find the host-mapped port and back-fill HostPort if needed.
+	// This runs for all pods (probe or no-probe) once the container is Running.
+	info, err := d.cli.ContainerInspect(ctx, containerName(pod))
+	if err != nil {
+		return false
+	}
+	if pod.Spec.Port > 0 {
+		portKey := nat.Port(fmt.Sprintf("%d/tcp", pod.Spec.Port))
+		if bindings, ok := info.NetworkSettings.Ports[portKey]; ok && len(bindings) > 0 {
+			if pod.HostPort == 0 {
+				var hp int
+				if _, err2 := fmt.Sscanf(bindings[0].HostPort, "%d", &hp); err2 == nil && hp > 0 {
+					pod.HostPort = hp
+				}
+			}
+		}
+	}
+
 	if pod.Spec.ReadinessProbe == nil {
 		// No probe configured: ready when running.
 		return true
 	}
 
-	// Inspect to find the host-mapped port.
-	info, err := d.cli.ContainerInspect(ctx, containerName(pod))
-	if err != nil {
-		return false
-	}
 	portKey := nat.Port(fmt.Sprintf("%d/tcp", pod.Spec.Port))
 	bindings, ok := info.NetworkSettings.Ports[portKey]
 	if !ok || len(bindings) == 0 {

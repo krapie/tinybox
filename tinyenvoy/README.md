@@ -13,7 +13,8 @@ Built as part of [tinybox](../README.md), a collection of simplified CNCF projec
 | Round-robin LB (`ROUND_ROBIN` policy) | `internal/balancer/roundrobin.go` |
 | Consistent-hash LB (`RING_HASH` policy) | `internal/balancer/ringhash.go` |
 | Active health checks (HEALTHY/UNHEALTHY state machine) | `internal/health/checker.go` |
-| Endpoint pool (ClusterLoadAssignment) | `internal/backend/pool.go` |
+| Endpoint pool with dynamic Add/Remove (ClusterLoadAssignment) | `internal/backend/pool.go` |
+| EDS-style endpoint discovery (polls tinykube Service API) | `internal/discovery/discovery.go` |
 | Prometheus stats sink | `internal/metrics/metrics.go` |
 | Access-log filter | `internal/middleware/logging.go` |
 | Stats filter | `internal/middleware/metrics.go` |
@@ -58,6 +59,7 @@ Built as part of [tinybox](../README.md), a collection of simplified CNCF projec
 | ROUND_ROBIN policy | `balancer.RoundRobin` |
 | RING_HASH policy | `balancer.RingHash` |
 | Active health check | `health.Checker` goroutine per endpoint |
+| EDS (Endpoint Discovery Service) | `internal/discovery` — polls tinykube Service API |
 | Stats sink (Prometheus) | `metrics.Registry` → `/metrics` |
 | HTTP filter chain | `middleware.Chain` |
 | xDS / dynamic config | `config.Watcher` (fsnotify on YAML file) |
@@ -129,9 +131,23 @@ clusters:
       timeout: 2s
       unhealthy_threshold: 3
       healthy_threshold: 2
-    endpoints:
+    endpoints:                 # static endpoints
       - addr: localhost:8081
       - addr: localhost:8082
+
+  - name: whoami
+    lb_policy: round-robin
+    health_check:
+      path: /health
+      interval: 5s
+      timeout: 2s
+      unhealthy_threshold: 3
+      healthy_threshold: 2
+    discovery:                           # EDS-style dynamic discovery
+      tinykube_addr: http://localhost:8080  # tinykube API server
+      service: whoami                    # tinykube Service name
+      namespace: default
+      interval: 5s                       # poll interval for /endpoints
 
 routes:
   - virtual_host: "api.example.com"
@@ -190,9 +206,12 @@ tinyenvoy/
     │   ├── logging_test.go
     │   ├── metrics.go        — stats filter (Prometheus per-cluster counters)
     │   └── metrics_test.go
-    └── proxy/
-        ├── proxy.go          — cluster proxy: LB pick → httputil.ReverseProxy
-        └── proxy_test.go
+    ├── proxy/
+    │   ├── proxy.go          — cluster proxy: LB pick → httputil.ReverseProxy
+    │   └── proxy_test.go
+    └── discovery/
+        ├── discovery.go      — EDS analogue: polls tinykube /endpoints, diffs pool+lb
+        └── discovery_test.go
 ```
 
 ## Key design decisions
@@ -211,3 +230,6 @@ Uses `X-Forwarded-For` header if present, falls back to `RemoteAddr`. This mirro
 
 **fsnotify as xDS analogue**
 Envoy uses xDS APIs (LDS/RDS/CDS/EDS) for dynamic config. tinyenvoy uses `fsnotify` on a YAML file as a file-based stand-in — same semantic (detect change, trigger reload), much simpler plumbing.
+
+**EDS-style endpoint discovery**
+When a cluster has a `discovery:` block, `internal/discovery` polls the tinykube Service `/endpoints` API at a configurable interval. Each poll diffs the response against the current pool: new addresses are added to both `pool` and `lb` (same `*Backend` pointer so health-checker state is shared); removed addresses are deleted from both. This mirrors Envoy's EDS — the same `ROUND_ROBIN`/`RING_HASH` load balancer works identically whether backends come from static config or dynamic discovery.

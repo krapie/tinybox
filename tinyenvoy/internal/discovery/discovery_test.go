@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/krapi0314/tinybox/tinyenvoy/internal/backend"
+	"github.com/krapi0314/tinybox/tinyenvoy/internal/balancer"
 	"github.com/krapi0314/tinybox/tinyenvoy/internal/discovery"
 )
 
@@ -83,6 +84,7 @@ func TestStartDiscovery_AddsEndpoints(t *testing.T) {
 	defer srv.Close()
 
 	pool := backend.NewPool(nil)
+	lb := balancer.NewRoundRobin()
 	c := discovery.NewClient(srv.URL)
 
 	cfg := &discovery.Config{
@@ -94,7 +96,7 @@ func TestStartDiscovery_AddsEndpoints(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	discovery.Start(ctx, c, pool, cfg)
+	discovery.Start(ctx, c, pool, lb, cfg)
 
 	// Give goroutine time to poll.
 	deadline := time.Now().Add(500 * time.Millisecond)
@@ -112,6 +114,15 @@ func TestStartDiscovery_AddsEndpoints(t *testing.T) {
 	if all[0].Addr != "localhost:54321" {
 		t.Errorf("backend addr = %q, want localhost:54321", all[0].Addr)
 	}
+
+	// Verify lb also has the backend
+	b := lb.Pick("")
+	if b == nil {
+		t.Fatal("lb.Pick() returned nil — backend not added to lb")
+	}
+	if b.Addr != "localhost:54321" {
+		t.Errorf("lb.Pick().Addr = %q, want localhost:54321", b.Addr)
+	}
 }
 
 func TestStartDiscovery_RemovesStaleEndpoints(t *testing.T) {
@@ -126,6 +137,7 @@ func TestStartDiscovery_RemovesStaleEndpoints(t *testing.T) {
 	defer srv.Close()
 
 	pool := backend.NewPool(nil)
+	lb := balancer.NewRoundRobin()
 	c := discovery.NewClient(srv.URL)
 	cfg := &discovery.Config{
 		Service:   "web-svc",
@@ -136,7 +148,7 @@ func TestStartDiscovery_RemovesStaleEndpoints(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	discovery.Start(ctx, c, pool, cfg)
+	discovery.Start(ctx, c, pool, lb, cfg)
 
 	// Wait for initial endpoint to appear.
 	deadline := time.Now().Add(500 * time.Millisecond)
@@ -153,7 +165,7 @@ func TestStartDiscovery_RemovesStaleEndpoints(t *testing.T) {
 	// Remove the endpoint from the server response.
 	current = nil
 
-	// Wait for removal.
+	// Wait for removal from both pool and lb.
 	deadline = time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
 		if len(pool.All()) == 0 {
@@ -163,5 +175,8 @@ func TestStartDiscovery_RemovesStaleEndpoints(t *testing.T) {
 	}
 	if len(pool.All()) != 0 {
 		t.Fatalf("after removal, pool size = %d, want 0", len(pool.All()))
+	}
+	if lb.Pick("") != nil {
+		t.Error("lb.Pick() should return nil after removal")
 	}
 }

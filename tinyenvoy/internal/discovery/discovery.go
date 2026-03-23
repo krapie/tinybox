@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/krapi0314/tinybox/tinyenvoy/internal/backend"
+	"github.com/krapi0314/tinybox/tinyenvoy/internal/balancer"
 )
 
 // Config holds the parameters for a single cluster's discovery.
@@ -70,33 +71,38 @@ func (c *Client) Endpoints(ns, svc string) ([]string, error) {
 }
 
 // Start launches a background goroutine that polls the endpoint API at cfg.Interval
-// and diffs the result against pool, adding new backends and removing stale ones.
+// and diffs the result against pool and lb, adding new backends and removing stale ones.
 // New backends are marked healthy=true by default; the health checker updates them later.
 // The goroutine stops when ctx is cancelled.
-func Start(ctx context.Context, c *Client, pool *backend.Pool, cfg *Config) {
+//
+// Both pool and lb are kept in sync so that:
+//   - pool.SetHealthy(addr, false) (called by health checkers) also affects lb.Pick()
+//     because the same *Backend pointer is shared between pool and lb.
+//   - lb.Pick() sees dynamically discovered backends, not just static config entries.
+func Start(ctx context.Context, c *Client, pool *backend.Pool, lb balancer.LbPolicy, cfg *Config) {
 	go func() {
 		ticker := time.NewTicker(cfg.Interval)
 		defer ticker.Stop()
 
 		// Poll immediately on startup.
-		sync(c, pool, cfg)
+		syncOnce(c, pool, lb, cfg)
 
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				sync(c, pool, cfg)
+				syncOnce(c, pool, lb, cfg)
 			}
 		}
 	}()
 }
 
-// sync fetches the current endpoint set and reconciles it against the pool.
-func sync(c *Client, pool *backend.Pool, cfg *Config) {
+// syncOnce fetches the current endpoint set and reconciles pool and lb.
+func syncOnce(c *Client, pool *backend.Pool, lb balancer.LbPolicy, cfg *Config) {
 	addrs, err := c.Endpoints(cfg.Namespace, cfg.Service)
 	if err != nil {
-		// Transient error — keep existing pool state.
+		// Transient error — keep existing state.
 		return
 	}
 
@@ -106,15 +112,18 @@ func sync(c *Client, pool *backend.Pool, cfg *Config) {
 		desired[addr] = true
 	}
 
-	// Remove backends no longer in the endpoint list.
+	// Remove backends no longer in the endpoint list from both pool and lb.
 	for _, b := range pool.All() {
 		if !desired[b.Addr] {
 			pool.Remove(b.Addr)
+			lb.Remove(b.Addr)
 		}
 	}
 
-	// Add backends that are not yet in the pool.
+	// Add new backends to both pool and lb (shared pointer so health updates affect both).
 	for addr := range desired {
-		pool.Add(backend.NewBackend(addr, true))
+		b := backend.NewBackend(addr, true)
+		pool.Add(b)
+		lb.Add(b)
 	}
 }
