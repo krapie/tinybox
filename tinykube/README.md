@@ -21,6 +21,11 @@ Built as part of [tinybox](../README.md), a collection of simplified CNCF projec
 ## Architecture
 
 ```
+  tkctl            curl / HTTP client
+    │                      │
+    └──────────┬───────────┘
+               │ HTTP REST (:8080)
+               ▼
 ┌──────────────────────────────────────────────────────────┐
 │                        tinykube                          │
 │                                                          │
