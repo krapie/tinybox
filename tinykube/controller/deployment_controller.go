@@ -44,15 +44,37 @@ func (c *DeploymentController) Start(ctx context.Context, interval time.Duration
 func (c *DeploymentController) Reconcile(ctx context.Context) error {
 	depItems := c.store.List("deployments/")
 	c.log.Debug("controller: reconcile — %d deployment(s)", len(depItems))
+
+	// Build set of active deployment names for orphan cleanup.
+	activeDeployments := make(map[string]bool, len(depItems))
 	for _, item := range depItems {
 		dep, ok := item.(*api.Deployment)
 		if !ok {
 			continue
 		}
+		activeDeployments[dep.Namespace+"/"+dep.Name] = true
 		if err := c.reconcileDeployment(ctx, dep); err != nil {
 			return err
 		}
 	}
+
+	// Delete orphaned pods whose deployment no longer exists.
+	for _, item := range c.store.List("pods/") {
+		pod, ok := item.(*api.Pod)
+		if !ok {
+			continue
+		}
+		depName := pod.Labels["deployment"]
+		key := pod.Namespace + "/" + depName
+		if depName != "" && !activeDeployments[key] {
+			c.log.Debug("controller: deleting orphaned pod %s (deployment %s gone)", pod.Name, depName)
+			if err := c.runtime.DeletePod(ctx, pod); err != nil {
+				c.log.Debug("controller: delete orphan pod %s: %v", pod.Name, err)
+			}
+			c.store.Delete("pods/" + pod.Namespace + "/" + pod.Name)
+		}
+	}
+
 	return nil
 }
 
