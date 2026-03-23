@@ -1,0 +1,36 @@
+# tinyenvoy example config
+# Mirrors Envoy's static bootstrap: listener → route_config → clusters
+
+# Listener (Envoy: static_resources.listeners)
+listener:
+  addr: ":8080"
+  tls:
+    enabled: false
+    cert: "cert.pem"
+    key:  "key.pem"
+
+# Admin / metrics (Envoy: admin + stats_sinks)
+admin:
+  addr: ":9090"  # serves /metrics (Prometheus)
+
+# Clusters (Envoy: static_resources.clusters)
+clusters:
+  - name: api
+    lb_policy: round-robin   # or: ring-hash
+    health_check:
+      path: /healthz
+      interval: 10s
+      timeout: 2s
+      unhealthy_threshold: 3
+      healthy_threshold: 2
+    endpoints:
+      - addr: localhost:8081
+      - addr: localhost:8082
+      - addr: localhost:8083
+
+# Route configuration (Envoy: route_config.virtual_hosts)
+routes:
+  - virtual_host: "*"
+    routes:
+      - prefix: /
+        cluster: api
