@@ -167,27 +167,32 @@ tinydns/
 ## Milestones
 
 ### M1 — DNS Server + Registry Plugin
-- [ ] UDP DNS server listening on :5353
-- [ ] Service registry (in-memory, REST API)
-- [ ] Registry plugin: resolve registered names to A records
+- [x] UDP + TCP DNS server (configurable address)
+- [x] Service registry (in-memory, round-robin, TTL expiry)
+- [x] Registry plugin: resolve registered names to A records
 - Tests written first: registry lookup, DNS response format
 
 ### M2 — Plugin Chain
-- [ ] Plugin interface and chain wiring
-- [ ] Log plugin
-- [ ] Cache plugin with TTL eviction
+- [x] Plugin interface (`plugins/plugin.go`)
+- [x] Log plugin (query name, type, rcode, latency)
+- [x] Cache plugin with TTL eviction
+- [x] Registry plugin
+- [x] Forward plugin with timeout
+- [x] Health plugin (HTTP GET /health)
 - Tests written first for each plugin in isolation
 
-### M3 — Forward Plugin
-- [ ] Forward unknown queries to upstream
-- [ ] Timeout handling
-- Tests written first with mock upstream server
+### M3 — Syncer (tinykube integration)
+- [x] Poll tinykube /pods + /services APIs
+- [x] Match running pods to service selectors
+- [x] Rebuild registry on each sync cycle
+- Tests written first with fake httptest server
 
-### M4 — Config Parser
-- [ ] Parse config file into Config struct
-- [ ] Wire plugins from config at startup
-- [ ] Health endpoint
-- Tests written first for config parsing
+### M4 — Config Parser + REST API + Main
+- [x] Parse config file into Config struct
+- [x] REST API for registry (POST/DELETE/GET /registry/services)
+- [x] Health endpoint
+- [x] cmd/tinydns/main.go wiring all components
+- Tests written first for config parsing and API handlers
 
 ## Test Strategy
 
