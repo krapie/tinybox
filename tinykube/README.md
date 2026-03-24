@@ -203,6 +203,17 @@ curl http://localhost:8080/apis/v1/namespaces/default/services/whoami/endpoints
 #  {"podName":"whoami-d3e4f","addr":"localhost:54322"}]
 ```
 
+> **macOS note:** endpoint addresses are `localhost:{hostPort}` (Docker host-mapped
+> ports) rather than `{podIP}:{port}` (container IPs). On macOS, Docker runs inside
+> a Linux VM so container IPs (`172.x.x.x`) are not reachable from the host —
+> only host-mapped ports are. This means the endpoint API is suitable for
+> host-level consumers (e.g. tinyenvoy) but **not** for pod-to-pod communication
+> inside Docker (pods should use container IPs or DNS instead).
+>
+> On Linux, Docker container IPs are directly routable from the host, so this
+> could be changed to return `{podIP}:{targetPort}` to serve both use cases.
+> This is a known limitation to revisit when running on Linux.
+
 ### Flags
 
 | Flag | Default | Description |
@@ -379,5 +390,10 @@ A hash of `PodSpec` (image + env + port) is stored as a `template-hash` label on
 **Logger injected at construction time**
 Every component (`Store`, `DeploymentController`, `DockerRuntime`, `ReadinessWatcher`) accepts a `*logger.Logger`. Production code passes `logger.New(true)` (debug on by default); tests pass `logger.NewNop()` so test output stays clean. No global logger state.
 
-**macOS readiness probe**
-Docker on macOS runs containers inside a Linux VM, so internal container IPs (`172.x.x.x`) are not reachable from the host. `IsReady` calls `ContainerInspect` to find the host-mapped port and probes `127.0.0.1:{hostPort}` instead.
+**macOS host-mapped ports (known limitation)**
+Docker on macOS runs containers inside a Linux VM, so container IPs (`172.x.x.x`) are not reachable from the macOS host. Two consequences:
+
+- `IsReady` uses `ContainerInspect` to find the host-mapped port and probes `127.0.0.1:{hostPort}` instead of the container IP.
+- The endpoint discovery API (`/services/{name}/endpoints`) returns `localhost:{hostPort}` addresses, which are reachable from the host (e.g. tinyenvoy) but **not from inside another container** — pods inside Docker should use `{podIP}:{port}` directly or resolve names via tinydns.
+
+On Linux, Docker container IPs are routable from the host without port mapping, so both readiness probes and endpoint addresses could use container IPs directly. This is a macOS-specific workaround to revisit when deploying on Linux.
