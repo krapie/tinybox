@@ -29,7 +29,7 @@ func main() {
 	flag.Parse()
 
 	// Defaults.
-	listenAddr := ":5353"
+	listenAddr := ":10053"
 	upstreamAddr := "8.8.8.8:53"
 	healthAddr := ":8181"
 	cacheTTL := 30 * time.Second

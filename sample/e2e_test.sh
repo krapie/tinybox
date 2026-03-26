@@ -28,7 +28,7 @@ ENVOY_PROXY="http://localhost:8888"
 ENVOY_ADMIN="http://localhost:9090"
 ENVOY_CONFIG="/tmp/tinybox-e2e-envoy.yaml"
 DNS_ADDR="127.0.0.1"
-DNS_PORT="5353"
+DNS_PORT="10053"
 LOG_TINYKUBE="/tmp/tinykube-e2e.log"
 LOG_TINYDNS="/tmp/tinydns-e2e.log"
 LOG_TINYENVOY="/tmp/tinyenvoy-e2e.log"
@@ -145,9 +145,9 @@ echo "$EP_ADDRS" | grep -q "^localhost:" \
 # ── 4. Start tinydns + DNS resolution ─────────────────────────────────────────
 section "4. Start tinydns (tinykube syncer)"
 
-lsof -ti :5353 | xargs kill -9 2>/dev/null || true
-lsof -ti :8181 | xargs kill -9 2>/dev/null || true
-lsof -ti :9053 | xargs kill -9 2>/dev/null || true
+lsof -ti :10053 | xargs kill -9 2>/dev/null || true
+lsof -ti :8181  | xargs kill -9 2>/dev/null || true
+lsof -ti :9053  | xargs kill -9 2>/dev/null || true
 sleep 0.5
 
 "$TINYDNS_BIN" -tinykube "$TINYKUBE_API" -namespace default > "$LOG_TINYDNS" 2>&1 &

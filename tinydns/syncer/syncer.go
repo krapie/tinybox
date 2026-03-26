@@ -100,7 +100,7 @@ func (s *Syncer) sync() {
 		if ns == "" {
 			ns = s.namespace
 		}
-		spec, _ := svc["serviceSpec"].(map[string]interface{})
+		spec, _ := svc["spec"].(map[string]interface{})
 		if spec == nil {
 			continue
 		}

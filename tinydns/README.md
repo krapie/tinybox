@@ -72,7 +72,8 @@ cd tinydns
 # Build
 go build -o tinydns ./cmd/tinydns/
 
-# Run with defaults (:5353 DNS, :9053 REST API, :8080 health)
+# Run with defaults (:10053 DNS, :9053 REST API, :8181 health)
+# Note: :5353 is reserved by mDNSResponder on macOS; use :10053 instead.
 ./tinydns
 
 # Run with tinykube sync (registers pod IPs into DNS automatically)
@@ -120,7 +121,7 @@ curl -X POST http://localhost:9053/registry/services \
 ### Query it
 
 ```bash
-dig @127.0.0.1 -p 5353 whoami.default.svc.cluster.local. A
+dig @127.0.0.1 -p 10053 whoami.default.svc.cluster.local. A
 # whoami.default.svc.cluster.local. 30 IN A 172.19.0.2
 ```
 

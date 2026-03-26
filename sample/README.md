@@ -76,7 +76,7 @@ tinydns syncs Running pod IPs from tinykube and serves them as DNS A records:
 ```bash
 cd tinydns
 go run ./cmd/tinydns/ -tinykube http://localhost:8080 -namespace default
-# [INFO] tinydns listening on :5353
+# [INFO] tinydns listening on :10053
 # [INFO] tinydns API listening on :9053
 # [INFO] tinydns health on 127.0.0.1:8181
 # [INFO] tinydns syncer polling http://localhost:8080 (ns=default)
@@ -85,7 +85,7 @@ go run ./cmd/tinydns/ -tinykube http://localhost:8080 -namespace default
 After the first sync cycle (up to 10s), query it:
 
 ```bash
-dig @127.0.0.1 -p 5353 whoami.default.svc.cluster.local. A +short
+dig @127.0.0.1 -p 10053 whoami.default.svc.cluster.local. A +short
 # 172.19.0.2
 # 172.19.0.3
 # 172.19.0.4
@@ -94,7 +94,7 @@ dig @127.0.0.1 -p 5353 whoami.default.svc.cluster.local. A +short
 These are Docker container IPs — suitable for pod-to-pod communication inside the Docker network. Unknown names return NXDOMAIN:
 
 ```bash
-dig @127.0.0.1 -p 5353 unknown.default.svc.cluster.local. A +short
+dig @127.0.0.1 -p 10053 unknown.default.svc.cluster.local. A +short
 # (empty — NXDOMAIN)
 ```
 
@@ -140,7 +140,7 @@ tkctl apply --name whoami --image traefik/whoami:v1.10 --replicas 3 --port 80
 watch -n1 "tkctl get pods"
 
 # tinydns automatically picks up new pod IPs on the next sync cycle
-dig @127.0.0.1 -p 5353 whoami.default.svc.cluster.local. A +short
+dig @127.0.0.1 -p 10053 whoami.default.svc.cluster.local. A +short
 # 172.19.0.5   ← new container IPs after rolling update
 # 172.19.0.6
 # 172.19.0.7

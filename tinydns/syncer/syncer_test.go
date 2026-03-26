@@ -38,7 +38,7 @@ func TestSyncerPopulatesRegistry(t *testing.T) {
 		},
 		services: []map[string]interface{}{
 			{"name": "whoami", "namespace": "default",
-				"serviceSpec": map[string]interface{}{"selector": map[string]interface{}{"app": "whoami"}, "port": 80}},
+				"spec": map[string]interface{}{"selector": map[string]interface{}{"app": "whoami"}, "port": 80}},
 		},
 	}
 	ts := httptest.NewServer(fake.handler())
@@ -69,7 +69,7 @@ func TestSyncerSkipsNonRunningPods(t *testing.T) {
 		},
 		services: []map[string]interface{}{
 			{"name": "svc", "namespace": "default",
-				"serviceSpec": map[string]interface{}{"selector": map[string]interface{}{"app": "svc"}, "port": 80}},
+				"spec": map[string]interface{}{"selector": map[string]interface{}{"app": "svc"}, "port": 80}},
 		},
 	}
 	ts := httptest.NewServer(fake.handler())
@@ -98,7 +98,7 @@ func TestSyncerMultiplePodsOnePodIP(t *testing.T) {
 		},
 		services: []map[string]interface{}{
 			{"name": "api", "namespace": "default",
-				"serviceSpec": map[string]interface{}{"selector": map[string]interface{}{"app": "api"}, "port": 8080}},
+				"spec": map[string]interface{}{"selector": map[string]interface{}{"app": "api"}, "port": 8080}},
 		},
 	}
 	ts := httptest.NewServer(fake.handler())
