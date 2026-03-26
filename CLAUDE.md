@@ -35,14 +35,16 @@ update SPEC.md → write tests → write implementation → verify tests pass �
 
 ## Documentation Sync — Mandatory
 
-**Every feature addition or bug fix must update both documents before committing:**
+**Every feature addition or bug fix must update all of the following before committing:**
 
 | Document | What to keep current |
 |---|---|
 | `SPEC.md` | Add/renumber component sections; fix any outdated API/behavior descriptions; mark milestones `[x]` when complete |
 | `README.md` | Usage examples, CLI commands, directory structure, "What it teaches" table, key design decisions |
+| `sample/e2e_test.sh` | Add/update test sections for any new component or feature; keep assertion count in sync |
+| `sample/README.md` | Update step-by-step guide, architecture diagram, and "What this demonstrates" table |
 
-Never commit implementation changes without updating both files in the same commit.
+Never commit implementation changes without updating all four files in the same commit.
 
 ## Code Conventions
 
