@@ -31,7 +31,7 @@ func main() {
 	// Defaults.
 	listenAddr := ":5353"
 	upstreamAddr := "8.8.8.8:53"
-	healthAddr := ":8080"
+	healthAddr := ":8181"
 	cacheTTL := 30 * time.Second
 
 	if *configPath != "" {

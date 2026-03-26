@@ -1,35 +1,42 @@
 #!/usr/bin/env bash
-# e2e_test.sh — end-to-end test for tinykube + tinyenvoy
+# e2e_test.sh — end-to-end test for tinykube + tinydns + tinyenvoy
 #
 # Tests:
 #   1. tinykube deploys 3 whoami pods (reconciliation loop)
 #   2. All 3 pods reach Running status (readiness probes)
-#   3. Service resource created; endpoint API returns 3 addresses (S1)
-#   4. tkctl service commands work (S2)
-#   5. tinyenvoy starts with dynamic endpoint discovery (S3)
+#   3. Service resource created; endpoint API returns 3 addresses
+#   4. tinydns resolves whoami DNS name to pod IPs (syncer integration)
+#   5. tinyenvoy starts with dynamic endpoint discovery
 #   6. Round-robin routes across all 3 pods
 #   7. Prometheus metrics are recorded
-#   8. Rolling update: image change replaces all pods; discovery re-syncs
-#   9. Delete cleans up all pods and service (orphan fix)
+#   8. Rolling update: image change replaces all pods; DNS + discovery re-sync
+#   9. Delete cleans up all pods and service
 #
-# Prerequisites: Docker Desktop, Go 1.23+
+# Prerequisites: Docker Desktop, Go 1.23+, dig (macOS default / bind-utils)
 # Run from: tinybox/sample/
 
 set -euo pipefail
 
 TINYKUBE_DIR="../tinykube"
 TINYENVOY_DIR="../tinyenvoy"
+TINYDNS_DIR="../tinydns"
 TKCTL_BIN="/tmp/tkctl-e2e"
+TINYDNS_BIN="/tmp/tinydns-e2e"
+TINYENVOY_BIN="/tmp/tinyenvoy-e2e"
 TINYKUBE_API="http://localhost:8080"
 ENVOY_PROXY="http://localhost:8888"
 ENVOY_ADMIN="http://localhost:9090"
 ENVOY_CONFIG="/tmp/tinybox-e2e-envoy.yaml"
+DNS_ADDR="127.0.0.1"
+DNS_PORT="5353"
 LOG_TINYKUBE="/tmp/tinykube-e2e.log"
+LOG_TINYDNS="/tmp/tinydns-e2e.log"
 LOG_TINYENVOY="/tmp/tinyenvoy-e2e.log"
 
 PASS=0
 FAIL=0
 TINYKUBE_PID=0
+TINYDNS_PID=0
 TINYENVOY_PID=0
 
 pass() { echo "  ✓ $1"; PASS=$((PASS+1)); }
@@ -39,7 +46,8 @@ section() { echo; echo "=== $1 ==="; }
 cleanup() {
   echo
   echo "=== cleanup ==="
-  [ "$TINYKUBE_PID" -ne 0 ] && kill "$TINYKUBE_PID" 2>/dev/null || true
+  [ "$TINYKUBE_PID"  -ne 0 ] && kill "$TINYKUBE_PID"  2>/dev/null || true
+  [ "$TINYDNS_PID"   -ne 0 ] && kill "$TINYDNS_PID"   2>/dev/null || true
   [ "$TINYENVOY_PID" -ne 0 ] && kill "$TINYENVOY_PID" 2>/dev/null || true
   docker ps -q --filter "label=tinykube=true" | xargs docker rm -f 2>/dev/null || true
   echo "  done"
@@ -56,8 +64,15 @@ else
   fail "tkctl build failed"; exit 1
 fi
 
+echo "  building tinydns..."
+if (cd "$TINYDNS_DIR" && go build -o "$TINYDNS_BIN" ./cmd/tinydns/); then
+  pass "tinydns built"
+else
+  fail "tinydns build failed"; exit 1
+fi
+
 echo "  building tinyenvoy..."
-if (cd "$TINYENVOY_DIR" && go build -o /tmp/tinyenvoy-e2e ./cmd/envoy/); then
+if (cd "$TINYENVOY_DIR" && go build -o "$TINYENVOY_BIN" ./cmd/envoy/); then
   pass "tinyenvoy built"
 else
   fail "tinyenvoy build failed"; exit 1
@@ -97,20 +112,17 @@ done
 RUNNING=$("$TKCTL_BIN" get pods --server "$TINYKUBE_API" 2>/dev/null | grep -c "Running" || true)
 [ "$RUNNING" -ge 3 ] && pass "3 pods Running" || fail "only $RUNNING pods Running (want 3)"
 
-# ── 3. Service resource + endpoint API (S1 / S2) ──────────────────────────────
-section "3. Service resource + endpoint discovery API (S1/S2)"
+# ── 3. Service resource + endpoint API ────────────────────────────────────────
+section "3. Service resource + endpoint discovery API"
 
-# S2: apply Service manifest via tkctl
 OUT=$("$TKCTL_BIN" apply -f manifests/whoami-svc.yaml --server "$TINYKUBE_API" 2>&1)
 echo "$OUT" | grep -q "created\|updated" && pass "service created via tkctl" \
   || fail "service create failed: $OUT"
 
-# S2: list services
 SVC_LIST=$("$TKCTL_BIN" get services --server "$TINYKUBE_API" 2>&1)
 echo "$SVC_LIST" | grep -q "whoami" && pass "tkctl get services shows whoami" \
   || fail "tkctl get services missing whoami: $SVC_LIST"
 
-# S1: endpoint discovery API — wait for all 3 Running pods to appear
 echo "  waiting for endpoint API to return 3 endpoints..."
 for i in {1..15}; do
   EP_COUNT=$(curl -sf "$TINYKUBE_API/apis/v1/namespaces/default/services/whoami/endpoints" \
@@ -124,21 +136,65 @@ EP_COUNT=$(curl -sf "$TINYKUBE_API/apis/v1/namespaces/default/services/whoami/en
 [ "${EP_COUNT:-0}" -ge 3 ] && pass "endpoint API returns $EP_COUNT endpoints (want ≥3)" \
   || fail "endpoint API returned ${EP_COUNT:-0} endpoints (want ≥3)"
 
-# Verify addr format is localhost:PORT
 EP_ADDRS=$(curl -sf "$TINYKUBE_API/apis/v1/namespaces/default/services/whoami/endpoints" \
   | python3 -c "import json,sys; [print(ep['addr']) for ep in json.load(sys.stdin)]" 2>/dev/null || true)
 echo "$EP_ADDRS" | grep -q "^localhost:" \
-  && pass "endpoint addrs are localhost:{port}" \
+  && pass "endpoint addrs are localhost:{port} (host-mapped, macOS)" \
   || fail "endpoint addrs malformed: $EP_ADDRS"
 
-# ── 4. Start tinyenvoy with discovery config (S3) ─────────────────────────────
-section "4. Start tinyenvoy (discovery mode, S3)"
+# ── 4. Start tinydns + DNS resolution ─────────────────────────────────────────
+section "4. Start tinydns (tinykube syncer)"
+
+lsof -ti :5353 | xargs kill -9 2>/dev/null || true
+lsof -ti :8181 | xargs kill -9 2>/dev/null || true
+lsof -ti :9053 | xargs kill -9 2>/dev/null || true
+sleep 0.5
+
+"$TINYDNS_BIN" -tinykube "$TINYKUBE_API" -namespace default > "$LOG_TINYDNS" 2>&1 &
+TINYDNS_PID=$!
+
+# Syncer polls every 10s; wait up to 30s for first sync + DNS resolution
+echo "  waiting for tinydns to sync and resolve whoami..."
+for i in {1..30}; do
+  DNS_COUNT=$(dig "@$DNS_ADDR" -p "$DNS_PORT" whoami.default.svc.cluster.local. A +short 2>/dev/null \
+    | grep -c "^[0-9]" || true)
+  [ "${DNS_COUNT:-0}" -ge 1 ] && break
+  sleep 1
+done
+
+DNS_IPS=$(dig "@$DNS_ADDR" -p "$DNS_PORT" whoami.default.svc.cluster.local. A +short 2>/dev/null \
+  | grep "^[0-9]" || true)
+DNS_COUNT=$(echo "$DNS_IPS" | grep -c "^[0-9]" 2>/dev/null || true)
+
+[ "${DNS_COUNT:-0}" -ge 3 ] \
+  && pass "DNS resolves whoami.default.svc.cluster.local. to $DNS_COUNT IPs (want ≥3)" \
+  || fail "DNS returned ${DNS_COUNT:-0} IPs (want ≥3)"
+
+# DNS uses pod container IPs (172.x.x.x), not localhost host-mapped ports
+echo "$DNS_IPS" | grep -q "^172\." \
+  && pass "DNS returns container IPs (172.x.x.x) for pod-to-pod communication" \
+  || fail "DNS IPs not in expected container range: $DNS_IPS"
+
+# Health endpoint
+HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8181/health 2>/dev/null || echo "000")
+[ "$HTTP_STATUS" = "200" ] \
+  && pass "tinydns health endpoint returns 200" \
+  || fail "tinydns health endpoint returned $HTTP_STATUS (want 200)"
+
+# NXDOMAIN for unknown name
+NXDOMAIN=$(dig "@$DNS_ADDR" -p "$DNS_PORT" unknown.default.svc.cluster.local. A 2>/dev/null \
+  | grep -c "NXDOMAIN" || true)
+[ "${NXDOMAIN:-0}" -ge 1 ] \
+  && pass "unknown name returns NXDOMAIN" \
+  || fail "unknown name did not return NXDOMAIN"
+
+# ── 5. Start tinyenvoy with discovery config ───────────────────────────────────
+section "5. Start tinyenvoy (discovery mode)"
 
 lsof -ti :8888 | xargs kill -9 2>/dev/null || true
 lsof -ti :9090 | xargs kill -9 2>/dev/null || true
 sleep 0.5
 
-# Write tinyenvoy config with discovery pointing at tinykube Service
 cat > "$ENVOY_CONFIG" <<EOF
 listener:
   addr: ":8888"
@@ -167,11 +223,10 @@ routes:
         cluster: whoami
 EOF
 
-/tmp/tinyenvoy-e2e -config "$ENVOY_CONFIG" > "$LOG_TINYENVOY" 2>&1 &
+"$TINYENVOY_BIN" -config "$ENVOY_CONFIG" > "$LOG_TINYENVOY" 2>&1 &
 TINYENVOY_PID=$!
 
-# Wait for tinyenvoy to start AND populate backends from discovery (up to 15s)
-echo "  waiting for tinyenvoy proxy to be ready with backends..."
+echo "  waiting for tinyenvoy proxy to be ready..."
 for i in {1..15}; do
   if curl -sf "$ENVOY_PROXY/" > /dev/null 2>&1; then
     pass "tinyenvoy proxy ready"
@@ -181,8 +236,8 @@ for i in {1..15}; do
   if [ "$i" -eq 15 ]; then fail "tinyenvoy did not start in time"; exit 1; fi
 done
 
-# ── 5. Round-robin routing ────────────────────────────────────────────────────
-section "5. Round-robin routing"
+# ── 6. Round-robin routing ─────────────────────────────────────────────────────
+section "6. Round-robin routing"
 
 HOSTNAMES=""
 for i in {1..9}; do
@@ -194,8 +249,8 @@ UNIQUE=$(echo "$HOSTNAMES" | tr ' ' '\n' | sort -u | grep -v '^$' | wc -l | tr -
 [ "$UNIQUE" -ge 3 ] && pass "round-robin hit $UNIQUE distinct backends" \
   || fail "round-robin only hit $UNIQUE backends (want ≥3)"
 
-# ── 6. Prometheus metrics ─────────────────────────────────────────────────────
-section "6. Prometheus metrics"
+# ── 7. Prometheus metrics ──────────────────────────────────────────────────────
+section "7. Prometheus metrics"
 
 METRICS=$(curl -sf "$ENVOY_ADMIN/metrics")
 
@@ -209,8 +264,8 @@ REQ_COUNT=$(echo "$METRICS" | grep 'tinyenvoy_requests_total{.*status="200"' \
 [ "${REQ_COUNT:-0}" -ge 9 ] \
   && pass "request counter ≥9 (got $REQ_COUNT)" || fail "request counter too low (got ${REQ_COUNT:-0})"
 
-# ── 7. Rolling update ─────────────────────────────────────────────────────────
-section "7. Rolling update"
+# ── 8. Rolling update ──────────────────────────────────────────────────────────
+section "8. Rolling update"
 
 "$TKCTL_BIN" apply --name whoami --image traefik/whoami:v1.10 --replicas 3 --port 80 \
   --server "$TINYKUBE_API" > /dev/null
@@ -227,8 +282,8 @@ NEW=$("$TKCTL_BIN" get pods --server "$TINYKUBE_API" 2>/dev/null | grep -c "v1.1
 [ "$NEW" -ge 3 ] && pass "rolling update complete — $NEW pods on v1.10" \
   || fail "rolling update incomplete — only $NEW pods on v1.10"
 
-# Wait for discovery to re-sync endpoints (new pods get new host ports)
-echo "  waiting for discovery to re-sync new endpoints..."
+# Endpoint API re-syncs after rolling update
+echo "  waiting for endpoint API to reflect new pods..."
 for i in {1..15}; do
   EP_COUNT=$(curl -sf "$TINYKUBE_API/apis/v1/namespaces/default/services/whoami/endpoints" \
     | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo 0)
@@ -238,16 +293,29 @@ done
 
 EP_AFTER=$(curl -sf "$TINYKUBE_API/apis/v1/namespaces/default/services/whoami/endpoints" \
   | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo 0)
-[ "${EP_AFTER:-0}" -ge 3 ] && pass "endpoint API still returns $EP_AFTER endpoints after rolling update" \
+[ "${EP_AFTER:-0}" -ge 3 ] && pass "endpoint API returns $EP_AFTER endpoints after rolling update" \
   || fail "endpoint API returned ${EP_AFTER:-0} endpoints after rolling update (want ≥3)"
 
-# ── 8. Delete cleans up pods and service ──────────────────────────────────────
-section "8. Delete deployment + service"
+# tinydns re-syncs after rolling update (new pod IPs from new containers)
+echo "  waiting for tinydns to re-sync new pod IPs..."
+for i in {1..20}; do
+  DNS_COUNT=$(dig "@$DNS_ADDR" -p "$DNS_PORT" whoami.default.svc.cluster.local. A +short 2>/dev/null \
+    | grep -c "^[0-9]" || true)
+  [ "${DNS_COUNT:-0}" -ge 3 ] && break
+  sleep 2
+done
+
+DNS_COUNT=$(dig "@$DNS_ADDR" -p "$DNS_PORT" whoami.default.svc.cluster.local. A +short 2>/dev/null \
+  | grep -c "^[0-9]" || true)
+[ "${DNS_COUNT:-0}" -ge 3 ] && pass "DNS still resolves $DNS_COUNT IPs after rolling update" \
+  || fail "DNS returned ${DNS_COUNT:-0} IPs after rolling update (want ≥3)"
+
+# ── 9. Delete cleans up pods and service ──────────────────────────────────────
+section "9. Delete deployment + service"
 
 OUT=$("$TKCTL_BIN" delete deployment whoami --server "$TINYKUBE_API" 2>&1)
 echo "$OUT" | grep -q "deleted" && pass "deployment deleted" || fail "deployment delete failed: $OUT"
 
-# S2: delete service via tkctl
 OUT=$("$TKCTL_BIN" delete service whoami --server "$TINYKUBE_API" 2>&1)
 echo "$OUT" | grep -q "deleted" && pass "service deleted via tkctl" || fail "service delete failed: $OUT"
 
