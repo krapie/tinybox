@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>tinyotel</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #0f1117; color: #e2e8f0; }
+    nav { display: flex; gap: 0; background: #1a1d27; border-bottom: 1px solid #2d3148; }
+    nav button { padding: 12px 20px; background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 14px; border-bottom: 2px solid transparent; }
+    nav button.active { color: #7c3aed; border-bottom-color: #7c3aed; }
+    nav button:hover:not(.active) { color: #e2e8f0; background: #1e2130; }
+    .page { display: none; padding: 20px; max-width: 1200px; margin: 0 auto; }
+    .page.active { display: block; }
+    h2 { font-size: 18px; margin-bottom: 16px; color: #c4b5fd; }
+    .filters { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+    .filters input, .filters select { padding: 7px 12px; background: #1e2130; border: 1px solid #2d3148; border-radius: 6px; color: #e2e8f0; font-size: 13px; }
+    .filters button { padding: 7px 16px; background: #7c3aed; border: none; border-radius: 6px; color: white; cursor: pointer; font-size: 13px; }
+    .filters button:hover { background: #6d28d9; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { text-align: left; padding: 8px 12px; color: #64748b; border-bottom: 1px solid #2d3148; font-weight: 500; }
+    td { padding: 8px 12px; border-bottom: 1px solid #1e2130; }
+    tr:hover td { background: #1a1d27; cursor: pointer; }
+    .badge { display: inline-block; padding: 2px 7px; border-radius: 12px; font-size: 11px; }
+    .badge.ok { background: #14532d; color: #4ade80; }
+    .badge.err { background: #450a0a; color: #f87171; }
+    .badge.info { background: #1e3a5f; color: #60a5fa; }
+    .badge.warn { background: #431407; color: #fb923c; }
+    .badge.debug { background: #1f2937; color: #9ca3af; }
+
+    /* Waterfall */
+    #waterfall { margin-top: 16px; }
+    .wf-header { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+    .wf-back { padding: 5px 12px; background: #2d3148; border: none; border-radius: 6px; color: #94a3b8; cursor: pointer; font-size: 13px; }
+    .wf-back:hover { background: #374170; }
+    .wf-spans { }
+    .wf-span { display: flex; align-items: center; height: 28px; margin-bottom: 3px; position: relative; }
+    .wf-label { width: 220px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #cbd5e1; padding-right: 8px; flex-shrink: 0; }
+    .wf-bar-track { flex: 1; position: relative; height: 16px; background: #1e2130; border-radius: 3px; overflow: hidden; }
+    .wf-bar { position: absolute; height: 100%; border-radius: 3px; background: #7c3aed; cursor: pointer; }
+    .wf-bar.error { background: #dc2626; }
+    .wf-bar:hover { opacity: 0.8; }
+    .wf-duration { width: 70px; text-align: right; font-size: 11px; color: #64748b; padding-left: 8px; flex-shrink: 0; }
+    .span-detail { margin-top: 16px; background: #1a1d27; border: 1px solid #2d3148; border-radius: 8px; padding: 16px; font-size: 13px; }
+    .span-detail h4 { margin-bottom: 8px; color: #c4b5fd; }
+    .attr-table { width: 100%; }
+    .attr-table td { padding: 4px 8px; border-bottom: 1px solid #1e2130; }
+    .attr-table td:first-child { color: #64748b; width: 200px; }
+
+    /* Metrics */
+    .metric-select { margin-bottom: 16px; }
+    .chart-wrap { background: #1a1d27; border: 1px solid #2d3148; border-radius: 8px; padding: 16px; }
+
+    /* Logs */
+    .log-row td { font-family: monospace; font-size: 12px; }
+    .log-row:hover td { background: #1a1d27; }
+  </style>
+</head>
+<body>
+
+<nav>
+  <button class="active" onclick="showPage('traces')">Traces</button>
+  <button onclick="showPage('metrics')">Metrics</button>
+  <button onclick="showPage('logs')">Logs</button>
+</nav>
+
+<!-- ═══════════════════════════════ TRACES ═══════════════════════════════════ -->
+<div id="page-traces" class="page active">
+  <h2>Trace Search</h2>
+  <div class="filters">
+    <select id="t-service"><option value="">All services</option></select>
+    <input id="t-operation" placeholder="Operation" style="width:180px">
+    <input id="t-min-dur" placeholder="minDuration (e.g. 10ms)" style="width:160px">
+    <button onclick="searchTraces()">Search</button>
+  </div>
+  <div id="trace-list">
+    <table>
+      <thead><tr><th>TraceID</th><th>Root Span</th><th>Services</th><th>Spans</th><th>Duration</th><th>Status</th></tr></thead>
+      <tbody id="trace-tbody"></tbody>
+    </table>
+  </div>
+  <div id="waterfall" style="display:none">
+    <div class="wf-header">
+      <button class="wf-back" onclick="closeWaterfall()">← Back</button>
+      <span id="wf-title" style="font-size:14px;color:#94a3b8"></span>
+    </div>
+    <div class="wf-spans" id="wf-spans"></div>
+    <div id="span-detail"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════ METRICS ══════════════════════════════════ -->
+<div id="page-metrics" class="page">
+  <h2>Metrics</h2>
+  <div class="filters metric-select">
+    <select id="m-name" onchange="loadMetric()"><option value="">Select metric…</option></select>
+  </div>
+  <div class="chart-wrap">
+    <canvas id="metric-chart" height="80"></canvas>
+  </div>
+</div>
+
+<!-- ════════════════════════════════ LOGS ════════════════════════════════════ -->
+<div id="page-logs" class="page">
+  <h2>Log Viewer</h2>
+  <div class="filters">
+    <select id="l-service"><option value="">All services</option></select>
+    <select id="l-severity">
+      <option value="">All severities</option>
+      <option>TRACE</option><option>DEBUG</option><option>INFO</option>
+      <option>WARN</option><option>ERROR</option><option>FATAL</option>
+    </select>
+    <input id="l-trace" placeholder="TraceID" style="width:260px">
+    <button onclick="searchLogs()">Search</button>
+  </div>
+  <table>
+    <thead><tr><th>Time</th><th>Severity</th><th>Service</th><th>Message</th><th>TraceID</th></tr></thead>
+    <tbody id="log-tbody"></tbody>
+  </table>
+</div>
+
+<script>
+const API = '';  // same origin
+
+// ── navigation ───────────────────────────────────────────────────────────────
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  event.currentTarget.classList.add('active');
+  if (name === 'metrics') initMetrics();
+  if (name === 'logs') initLogs();
+}
+
+// ── traces ───────────────────────────────────────────────────────────────────
+async function initTraces() {
+  const res = await fetch(API + '/api/v1/services');
+  const services = await res.json();
+  const sel = document.getElementById('t-service');
+  services.forEach(s => {
+    const o = document.createElement('option');
+    o.value = s; o.textContent = s;
+    sel.appendChild(o);
+  });
+  searchTraces();
+}
+
+async function searchTraces() {
+  const service = document.getElementById('t-service').value;
+  const op = document.getElementById('t-operation').value;
+  const minDur = document.getElementById('t-min-dur').value;
+  let url = API + '/api/v1/traces?limit=100';
+  if (service) url += '&service=' + encodeURIComponent(service);
+  if (op) url += '&operation=' + encodeURIComponent(op);
+  if (minDur) url += '&minDuration=' + encodeURIComponent(minDur);
+
+  const res = await fetch(url);
+  const traces = await res.json();
+  const tbody = document.getElementById('trace-tbody');
+  tbody.innerHTML = '';
+  (traces || []).forEach(t => {
+    const tr = document.createElement('tr');
+    const status = t.hasError
+      ? '<span class="badge err">error</span>'
+      : '<span class="badge ok">ok</span>';
+    tr.innerHTML = `
+      <td><code style="font-size:11px">${t.traceID.slice(0,16)}…</code></td>
+      <td>${t.rootSpan || ''}</td>
+      <td>${(t.services||[]).join(', ')}</td>
+      <td>${t.spanCount}</td>
+      <td>${t.durationMs}ms</td>
+      <td>${status}</td>`;
+    tr.onclick = () => openWaterfall(t.traceID);
+    tbody.appendChild(tr);
+  });
+}
+
+async function openWaterfall(traceID) {
+  const res = await fetch(API + '/api/v1/traces/' + traceID);
+  const spans = await res.json();
+  document.getElementById('trace-list').style.display = 'none';
+  document.getElementById('waterfall').style.display = 'block';
+  document.getElementById('wf-title').textContent = traceID;
+  document.getElementById('span-detail').innerHTML = '';
+
+  const minT = Math.min(...spans.map(s => s.StartTimeMs));
+  const maxT = Math.max(...spans.map(s => s.EndTimeMs));
+  const total = maxT - minT || 1;
+
+  const container = document.getElementById('wf-spans');
+  container.innerHTML = '';
+  spans.forEach(sp => {
+    const left = ((sp.StartTimeMs - minT) / total * 100).toFixed(2);
+    const width = Math.max(((sp.EndTimeMs - sp.StartTimeMs) / total * 100), 0.5).toFixed(2);
+    const isErr = sp.Status && sp.Status.Code === 2;
+    const row = document.createElement('div');
+    row.className = 'wf-span';
+    row.innerHTML = `
+      <div class="wf-label" title="${sp.Name}">${sp.Name}</div>
+      <div class="wf-bar-track">
+        <div class="wf-bar${isErr?' error':''}" style="left:${left}%;width:${width}%"
+             onclick="showSpanDetail(${JSON.stringify(sp).replace(/"/g,'&quot;')})"></div>
+      </div>
+      <div class="wf-duration">${sp.EndTimeMs - sp.StartTimeMs}ms</div>`;
+    container.appendChild(row);
+  });
+}
+
+function showSpanDetail(sp) {
+  const attrs = Object.entries(sp.Attributes || {});
+  const rows = attrs.map(([k,v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+  document.getElementById('span-detail').innerHTML = `
+    <div class="span-detail">
+      <h4>${sp.Name} <span style="color:#64748b;font-weight:normal;font-size:12px">(${sp.SpanID})</span></h4>
+      <table class="attr-table"><tbody>
+        <tr><td>TraceID</td><td><code>${sp.TraceID}</code></td></tr>
+        <tr><td>SpanID</td><td><code>${sp.SpanID}</code></td></tr>
+        <tr><td>Service</td><td>${sp.Resource?.Attributes?.['service.name'] || ''}</td></tr>
+        <tr><td>Start</td><td>${new Date(sp.StartTimeMs).toISOString()}</td></tr>
+        <tr><td>Duration</td><td>${sp.EndTimeMs - sp.StartTimeMs}ms</td></tr>
+        ${rows}
+      </tbody></table>
+    </div>`;
+}
+
+function closeWaterfall() {
+  document.getElementById('waterfall').style.display = 'none';
+  document.getElementById('trace-list').style.display = 'block';
+}
+
+// ── metrics ──────────────────────────────────────────────────────────────────
+let metricChart = null;
+
+async function initMetrics() {
+  const res = await fetch(API + '/api/v1/metric-names');
+  const names = await res.json();
+  const sel = document.getElementById('m-name');
+  sel.innerHTML = '<option value="">Select metric…</option>';
+  (names || []).forEach(n => {
+    const o = document.createElement('option');
+    o.value = n; o.textContent = n;
+    sel.appendChild(o);
+  });
+}
+
+async function loadMetric() {
+  const name = document.getElementById('m-name').value;
+  if (!name) return;
+  const res = await fetch(API + '/api/v1/metrics?name=' + encodeURIComponent(name));
+  const series = await res.json();
+
+  const allPoints = (series || []).flatMap(s => s.Points || []);
+  allPoints.sort((a, b) => a.TimeMs - b.TimeMs);
+
+  const labels = allPoints.map(p => new Date(p.TimeMs).toISOString().slice(11,19));
+  const data = allPoints.map(p => p.Value);
+
+  const ctx = document.getElementById('metric-chart').getContext('2d');
+  if (metricChart) metricChart.destroy();
+  metricChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: name,
+        data,
+        borderColor: '#7c3aed',
+        backgroundColor: 'rgba(124,58,237,0.1)',
+        borderWidth: 2,
+        pointRadius: 3,
+        tension: 0.3,
+      }]
+    },
+    options: {
+      animation: false,
+      responsive: true,
+      plugins: { legend: { labels: { color: '#94a3b8' } } },
+      scales: {
+        x: { ticks: { color: '#64748b' }, grid: { color: '#1e2130' } },
+        y: { ticks: { color: '#64748b' }, grid: { color: '#1e2130' } },
+      }
+    }
+  });
+}
+
+// ── logs ─────────────────────────────────────────────────────────────────────
+async function initLogs() {
+  const res = await fetch(API + '/api/v1/services');
+  const services = await res.json();
+  const sel = document.getElementById('l-service');
+  sel.innerHTML = '<option value="">All services</option>';
+  (services || []).forEach(s => {
+    const o = document.createElement('option');
+    o.value = s; o.textContent = s;
+    sel.appendChild(o);
+  });
+  searchLogs();
+}
+
+async function searchLogs() {
+  const service = document.getElementById('l-service').value;
+  const severity = document.getElementById('l-severity').value;
+  const traceID = document.getElementById('l-trace').value;
+  let url = API + '/api/v1/logs?limit=200';
+  if (service) url += '&service=' + encodeURIComponent(service);
+  if (severity) url += '&severity=' + encodeURIComponent(severity);
+  if (traceID) url += '&traceID=' + encodeURIComponent(traceID);
+
+  const res = await fetch(url);
+  const records = await res.json();
+  const tbody = document.getElementById('log-tbody');
+  tbody.innerHTML = '';
+  (records || []).forEach(r => {
+    const tr = document.createElement('tr');
+    tr.className = 'log-row';
+    const sev = r.severity || '';
+    const sevClass = sev === 'ERROR' || sev === 'FATAL' ? 'err' :
+                     sev === 'WARN' ? 'warn' :
+                     sev === 'DEBUG' || sev === 'TRACE' ? 'debug' : 'info';
+    const tid = r.traceID
+      ? `<span style="cursor:pointer;color:#7c3aed" onclick="filterByTrace('${r.traceID}')">${r.traceID.slice(0,16)}…</span>`
+      : '';
+    tr.innerHTML = `
+      <td>${new Date(r.timeMs).toISOString().replace('T',' ').slice(0,19)}</td>
+      <td><span class="badge ${sevClass}">${sev}</span></td>
+      <td>${r.resource?.['service.name'] || ''}</td>
+      <td>${r.body}</td>
+      <td>${tid}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function filterByTrace(id) {
+  showPage('traces', {currentTarget: document.querySelector('nav button')});
+  // switch to trace page and open waterfall
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-traces').classList.add('active');
+  document.querySelector('nav button').classList.add('active');
+  openWaterfall(id);
+}
+
+// ── init ─────────────────────────────────────────────────────────────────────
+initTraces();
+</script>
+</body>
+</html>

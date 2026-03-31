@@ -1,8 +1,8 @@
 # tinybox sample
 
-End-to-end demo showing **tinykube** + **tinydns** + **tinyenvoy** working together.
+End-to-end demo showing **tinykube** + **tinydns** + **tinyotel** + **tinyenvoy** working together.
 
-tinykube manages the pod lifecycle (real Docker containers) and exposes a Service endpoint API. tinydns runs alongside it, syncing Running pod IPs into DNS so services can be discovered by name. tinyenvoy sits in front as the L7 proxy, discovering backends from the tinykube Service API and routing traffic with round-robin load balancing.
+tinykube manages the pod lifecycle (real Docker containers) and exposes a Service endpoint API. tinydns syncs Running pod IPs into DNS. tinyotel collects OTLP traces, metrics, and logs from instrumented services. tinyenvoy sits in front as the L7 proxy, discovering backends from tinykube and routing traffic with round-robin load balancing.
 
 ## What this demonstrates
 
@@ -11,6 +11,7 @@ tinykube manages the pod lifecycle (real Docker containers) and exposes a Servic
 | Deploy | tinykube | Reconciliation loop creates 3 whoami pods |
 | Service | tkctl | Service object registers selector; endpoint API returns live pod addresses |
 | DNS | tinydns | Syncer polls tinykube; `whoami.default.svc.cluster.local.` resolves to pod IPs |
+| Observability | tinyotel | OTLP receiver ingests traces/metrics/logs; query API returns stored data |
 | Route | tinyenvoy | Discovers backends via Service API; round-robin load balancing |
 | Update | tkctl | Rolling update changes image; DNS + tinyenvoy re-sync backends automatically |
 | Metrics | tinyenvoy | Prometheus counters + latency histograms |
@@ -98,7 +99,37 @@ dig @127.0.0.1 -p 10053 unknown.default.svc.cluster.local. A +short
 # (empty — NXDOMAIN)
 ```
 
-### 5. Start tinyenvoy (auto-discovery mode)
+### 5. Start tinyotel (OTLP receiver + query API)
+
+tinyotel collects traces, metrics, and logs from any OTLP-instrumented service:
+
+```bash
+cd tinyotel
+go run ./cmd/tinyotel/
+# tinyotel OTLP receiver  listening on :4318
+# tinyotel query API + UI  listening on :4319
+```
+
+Send a test trace span:
+
+```bash
+curl -s -X POST http://localhost:4318/v1/traces \
+  -H "Content-Type: application/json" \
+  -d '{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"mysvc"}}]},"scopeSpans":[{"spans":[{"traceId":"aabbccddeeff00112233445566778899","spanId":"aabbccdd11223344","name":"my-op","kind":2,"startTimeUnixNano":1700000000000000000,"endTimeUnixNano":1700000001000000000,"attributes":[],"status":{"code":1}}]}]}]}'
+# {"partialSuccess":{}}
+```
+
+Query the trace back:
+
+```bash
+curl -s http://localhost:4319/api/v1/traces | jq .
+# [{"traceID":"aabbccddeeff00112233445566778899","rootSpan":"my-op","spanCount":1,"durationMs":1000,...}]
+
+# Open the web UI (trace waterfall, metrics chart, log viewer)
+open http://localhost:4319/ui/
+```
+
+### 6. Start tinyenvoy (auto-discovery mode)
 
 ```bash
 cd tinyenvoy
@@ -110,7 +141,7 @@ go run ./cmd/envoy -config ../sample/envoy-config.yaml
 
 tinyenvoy polls the tinykube endpoint API every 5 seconds and keeps its backend pool in sync — no manual configuration of host ports required.
 
-### 6. Route through tinyenvoy
+### 7. Route through tinyenvoy
 
 ```bash
 # Round-robin across all 3 pods
@@ -122,7 +153,7 @@ for i in {1..6}; do curl -s http://localhost:8888/ | grep Hostname; done
 # ...
 ```
 
-### 7. Check Prometheus metrics
+### 8. Check Prometheus metrics
 
 ```bash
 curl http://localhost:9090/metrics | grep tinyenvoy
@@ -130,7 +161,7 @@ curl http://localhost:9090/metrics | grep tinyenvoy
 # tinyenvoy_request_duration_seconds_sum{...} 0.012
 ```
 
-### 8. Rolling update (DNS + tinyenvoy auto-resync)
+### 9. Rolling update (DNS + tinyenvoy auto-resync)
 
 ```bash
 tkctl apply --name whoami --image traefik/whoami:v1.10 --replicas 3 --port 80
@@ -149,7 +180,7 @@ dig @127.0.0.1 -p 10053 whoami.default.svc.cluster.local. A +short
 for i in {1..6}; do curl -s http://localhost:8888/ | grep Hostname; done
 ```
 
-### 9. Clean up
+### 10. Clean up
 
 ```bash
 tkctl delete deployment whoami
@@ -171,6 +202,7 @@ Output:
   ✓ tkctl built
   ✓ tinydns built
   ✓ tinyenvoy built
+  ✓ tinyotel built
 
 === 2. Deploy whoami (3 replicas) ===
   ✓ deployment created
@@ -188,24 +220,34 @@ Output:
   ✓ tinydns health endpoint returns 200
   ✓ unknown name returns NXDOMAIN
 
-=== 5. Start tinyenvoy (discovery mode) ===
+=== 5. Start tinyotel (OTLP receiver + query API) ===
+  ✓ tinyotel health endpoint returns 200
+  ✓ OTLP traces endpoint accepts spans (200)
+  ✓ OTLP metrics endpoint accepts data points (200)
+  ✓ OTLP logs endpoint accepts records (200)
+  ✓ tinyotel trace API returns 1 trace(s)
+  ✓ tinyotel services API lists e2e-svc
+  ✓ tinyotel metric-names API lists e2e.counter
+  ✓ tinyotel log API returns 1 record(s)
+
+=== 6. Start tinyenvoy (discovery mode) ===
   ✓ tinyenvoy proxy ready
 
-=== 6. Round-robin routing ===
+=== 7. Round-robin routing ===
   ✓ round-robin hit 3 distinct backends
 
-=== 7. Prometheus metrics ===
+=== 8. Prometheus metrics ===
   ✓ tinyenvoy_requests_total present
   ✓ tinyenvoy_request_duration_seconds present
   ✓ request counter ≥9
 
-=== 8. Rolling update ===
+=== 9. Rolling update ===
   ✓ rolling update triggered
   ✓ rolling update complete — 3 pods on v1.10
   ✓ endpoint API returns 3 endpoints after rolling update
   ✓ DNS still resolves 3 IPs after rolling update
 
-=== 9. Delete deployment + service ===
+=== 10. Delete deployment + service ===
   ✓ deployment deleted
   ✓ service deleted via tkctl
   ✓ all pods removed after delete
@@ -213,15 +255,26 @@ Output:
   ✓ endpoint API returns 0 or 404 after service deletion
 
 ════════════════════════════════
-  Results: 27 passed, 0 failed
+  Results: 36 passed, 0 failed
 ════════════════════════════════
 ```
 
 ## Architecture
 
 ```
+  OTLP clients (curl / instrumented services)
+       │ POST /v1/traces   /v1/metrics   /v1/logs
+       ▼ :4318
+┌──────────────────────────────────────┐
+│             tinyotel                 │
+│  OTLP/HTTP receiver                  │
+│  processor: batch→attributes→sample  │
+│  stores: traces / metrics / logs     │
+│  query API + web UI → :4319          │
+└──────────────────────────────────────┘
+
   dig / pod-to-pod DNS
-       │ :5353
+       │ :10053
        ▼
 ┌──────────────────────────────────────┐
 │             tinydns                  │
@@ -266,9 +319,10 @@ Output:
 └──────────┘ └──────────┘ └──────────┘
 ```
 
-**Two endpoint paths, two use cases:**
+**Endpoint paths:**
 - **tinydns** → container IPs (`172.x.x.x`) — for pod-to-pod DNS inside Docker
 - **tinyenvoy** → `localhost:{hostPort}` — for host-level traffic routing (macOS)
+- **tinyotel** → collects OTLP telemetry; query API at `:4319/ui/`
 
 ## Manifest files
 

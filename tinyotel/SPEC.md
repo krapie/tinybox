@@ -438,33 +438,33 @@ tinyotel/
 ## Milestones
 
 ### M1 — Data Model + OTLP Receiver + Trace Store
-- [ ] Define all model types (`Span`, `Metric`, `LogRecord`, `Resource`)
-- [ ] OTLP/HTTP receiver: parse `resourceSpans` JSON, extract spans + resource
-- [ ] Trace store: append, `GetTrace`, `Search` with time-range + service filter
-- [ ] Retention eviction on trace store
+- [x] Define all model types (`Span`, `Metric`, `LogRecord`, `Resource`)
+- [x] OTLP/HTTP receiver: parse `resourceSpans` JSON, extract spans + resource
+- [x] Trace store: append, `GetTrace`, `Search` with time-range + service filter
+- [x] Retention eviction on trace store
 - Tests written first: model construction, OTLP JSON parsing, store append/search/retention
 
 ### M2 — Processor Pipeline + Context Propagator
-- [ ] `Processor` interface and chain execution
-- [ ] `BatchProcessor`: accumulate + flush by size and interval
-- [ ] `AttributeProcessor`: insert/update/delete/rename rules
-- [ ] `SamplingProcessor`: consistent per-trace probability sampling
-- [ ] W3C `traceparent` extract and inject
-- [ ] W3C `baggage` extract and inject
+- [x] `Processor` interface and chain execution
+- [x] `BatchProcessor`: accumulate + flush by size and interval
+- [x] `AttributeProcessor`: insert/update/delete/rename rules
+- [x] `SamplingProcessor`: consistent per-trace probability sampling
+- [x] W3C `traceparent` extract and inject
+- [x] W3C `baggage` extract and inject
 - Tests written first: each processor independently, propagator round-trips
 
 ### M3 — Metrics + Log Receiver + Stores
-- [ ] OTLP receiver: parse `resourceMetrics` (Sum, Gauge, Histogram)
-- [ ] Metrics store: append data points, query by name + attributes + time range
-- [ ] OTLP receiver: parse `resourceLogs`
-- [ ] Log store: ring buffer append, query by service/severity/traceID
+- [x] OTLP receiver: parse `resourceMetrics` (Sum, Gauge, Histogram)
+- [x] Metrics store: append data points, query by name + attributes + time range
+- [x] OTLP receiver: parse `resourceLogs`
+- [x] Log store: ring buffer append, query by service/severity/traceID
 - Tests written first: metrics store append/query/retention, log store query/eviction
 
 ### M4 — Query API + Web UI
-- [ ] All API endpoints wired to stores
-- [ ] Trace search and waterfall endpoints
-- [ ] Metrics and log query endpoints
-- [ ] Web UI: trace search table, waterfall view, metrics chart, log viewer
+- [x] All API endpoints wired to stores
+- [x] Trace search and waterfall endpoints
+- [x] Metrics and log query endpoints
+- [x] Web UI: trace search table, waterfall view, metrics chart, log viewer
 - Tests written first for all API handlers with `httptest`
 
 ## Test Strategy
